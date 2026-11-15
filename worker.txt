@@ -1,0 +1,206 @@
+const corsHeaders = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+};
+
+export default {
+    async fetch(request, env, ctx) {
+        const url = new URL(request.url);
+        if (request.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
+
+        try {
+            // 1. API LOGIN & ĐỔI MẬT KHẨU
+            if (url.pathname === '/api/login' && request.method === 'POST') {
+                const { username, password } = await request.json();
+                const user = await env.DB.prepare(`SELECT id, username, full_name, role, line_id, password_hash FROM Users WHERE username = ? AND password_hash = ?`).bind(username, password).first();
+                if (!user) return new Response(JSON.stringify({ error: "Sai tài khoản hoặc mật khẩu" }), { status: 401, headers: corsHeaders });
+                return new Response(JSON.stringify({ success: true, user }), { headers: corsHeaders });
+            }
+
+            if (url.pathname === '/api/change-password' && request.method === 'POST') {
+                const { username, new_password } = await request.json();
+                await env.DB.prepare(`UPDATE Users SET password_hash = ? WHERE username = ?`).bind(new_password, username).run();
+                return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
+            }
+
+            // 2. API MOVE (Đã nhúng tính năng Lưu Lịch Sử và Tách NG theo từng trạm)
+            if (url.pathname === '/api/move' && request.method === 'POST') {
+                const body = await request.json();
+                const lot_num = body.lot_number || body.po_id; 
+                const from_stage = String(body.from_stage ?? "").toUpperCase();
+                const qPass = parseInt(body.qty_pass) || 0;
+                const qNG = parseInt(body.qty_ng) || 0;
+                const userId = body.user_id || 0;
+
+                let final_p_id = body.product_id;
+                const inv = await env.DB.prepare(`SELECT product_id FROM Inventory WHERE lot_number = ? LIMIT 1`).bind(lot_num).first();
+                if (inv) final_p_id = inv.product_id;
+
+                const product = await env.DB.prepare(`SELECT routing_map FROM Products WHERE CAST(id AS TEXT) = CAST(? AS TEXT) OR product_code = ?`).bind(final_p_id ?? "", final_p_id ?? "").first();
+                if (!product) throw new Error("Không tìm thấy mã sản phẩm!");
+                
+                let next_stage = 'THANH_PHAM';
+                if (product.routing_map) {
+                    try {
+                        const routingMap = JSON.parse(product.routing_map);
+                        const currentIndex = routingMap.findIndex(s => String(s.stage_id).toUpperCase() === from_stage);
+                        if (currentIndex !== -1 && currentIndex < routingMap.length - 1) {
+                            next_stage = String(routingMap[currentIndex + 1].stage_id).toUpperCase();
+                        }
+                    } catch(e) {}
+                }
+
+                const stmts = [];
+                // Trừ kho hiện tại
+                stmts.push(env.DB.prepare(`UPDATE Inventory SET quantity = quantity - ?, updated_at = CURRENT_TIMESTAMP WHERE lot_number = ? AND TRIM(UPPER(stage_id)) = TRIM(?)`).bind(qPass + qNG, lot_num, from_stage));
+
+                // Cộng Hàng PASS
+                if (qPass > 0) {
+                    stmts.push(env.DB.prepare(`INSERT INTO Inventory (product_id, lot_number, stage_id, quantity) VALUES (?, ?, ?, ?) ON CONFLICT(product_id, lot_number, stage_id) DO UPDATE SET quantity = quantity + excluded.quantity;`).bind(final_p_id, lot_num, next_stage, qPass));
+                    // Lưu Lịch Sử PASS
+                    stmts.push(env.DB.prepare(`INSERT INTO Transactions_Log (user_id, po_id, from_stage, to_stage, qty, type) VALUES (?, ?, ?, ?, ?, 'PASS')`).bind(userId, lot_num, from_stage, next_stage, qPass));
+                }
+
+                // Cộng Hàng NG (Gắn đuôi _NG để Matrix gom nhóm)
+                if (qNG > 0) {
+                    const ngStageId = from_stage + '_NG';
+                    stmts.push(env.DB.prepare(`INSERT INTO Inventory (product_id, lot_number, stage_id, quantity) VALUES (?, ?, ?, ?) ON CONFLICT(product_id, lot_number, stage_id) DO UPDATE SET quantity = quantity + excluded.quantity;`).bind(final_p_id, lot_num, ngStageId, qNG));
+                    // Lưu Lịch Sử NG
+                    stmts.push(env.DB.prepare(`INSERT INTO Transactions_Log (user_id, po_id, from_stage, to_stage, qty, type) VALUES (?, ?, ?, 'KHO_NG', ?, 'NG')`).bind(userId, lot_num, from_stage, qNG));
+                }
+
+                await env.DB.batch(stmts);
+                return new Response(JSON.stringify({ success: true, routed_to: next_stage }), { headers: corsHeaders });
+            }
+
+            // 3, 4, 5. SẢN PHẨM & PO (Giữ nguyên)
+            if (url.pathname === '/api/products' && request.method === 'GET') {
+                const { results } = await env.DB.prepare(`SELECT * FROM Products`).all();
+                return new Response(JSON.stringify({ products: results }), { headers: corsHeaders });
+            }
+            if (url.pathname === '/api/products' && request.method === 'POST') {
+                const body = await request.json();
+                try {
+                    await env.DB.prepare(`INSERT INTO Products (product_code, product_name, routing_map) VALUES (?, ?, ?)`).bind(body.product_code, body.product_name, JSON.stringify(body.routing_map)).run();
+                    return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
+                } catch (e) { return new Response(JSON.stringify({ error: "Lỗi lưu DB" }), { status: 400, headers: corsHeaders }); }
+            }
+            if (url.pathname === '/api/po/create' && request.method === 'POST') {
+                try {
+                    const body = await request.json();
+                    const product = await env.DB.prepare(`SELECT * FROM Products WHERE UPPER(product_code) = UPPER(?)`).bind(body.product_code).first();
+                    if (!product) throw new Error("Mã chưa khai báo");
+                    let first_stage = 'CAT';
+                    if (product.routing_map) {
+                        try { const r = JSON.parse(product.routing_map); if (r.length > 0) first_stage = String(r[0].stage_id).toUpperCase(); } catch(e) {}
+                    }
+                    const pId = String(product.id || product.product_code);
+                    await env.DB.batch([
+                        env.DB.prepare(`INSERT INTO Production_Orders (po_number, product_id, month, total_qty, status) VALUES (?, ?, ?, ?, 'OPEN')`).bind(body.po_number, pId, body.production_date, body.total_qty),
+                        env.DB.prepare(`INSERT INTO Inventory (product_id, lot_number, stage_id, quantity) VALUES (?, ?, ?, ?)`).bind(pId, body.po_number, first_stage, body.total_qty)
+                    ]);
+                    return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
+                } catch (err) { return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders }); }
+            }
+
+            // 6. API MATRIX (Đã fix lỗi Tổng Số Lượng không bị trừ đi khi có hàng NG)
+            if (url.pathname === '/api/dashboard/matrix' && request.method === 'GET') {
+                const stagesList = [
+                    'CAT', 'NHIET_LUYEN', 'DO_CUNG', 'NC1', 'NC2', 'NC3', 'MNC1', 'MNC2', 'MNC3', 
+                    'GS', 'GV', 'GP', 'GE', 'GI', 'LAP_RAP', 'DONG_THUNG', 'XUAT_GCN', 'NHAN_GCN', 'KIEM_TRA'
+                ];
+                let queryFields = stagesList.map(st => `
+                    SUM(CASE WHEN UPPER(i.stage_id) = '${st}' THEN i.quantity ELSE 0 END) AS qty_${st.toLowerCase()},
+                    SUM(CASE WHEN UPPER(i.stage_id) = '${st}_NG' THEN i.quantity ELSE 0 END) AS ng_${st.toLowerCase()},
+                    MAX(CASE WHEN UPPER(i.stage_id) = '${st}' THEN i.updated_at ELSE NULL END) AS date_${st.toLowerCase()}
+                `).join(',');
+
+                const { results } = await env.DB.prepare(`
+                    SELECT 
+                        i.lot_number, p.product_code, po.month as production_date, 
+                        
+                        -- ĐÃ SỬA: Tính tổng TẤT CẢ hàng hóa (Cả OK và NG) để giữ nguyên số lượng tham chiếu của LOT
+                        SUM(i.quantity) as total_qty, 
+                        
+                        ${queryFields},
+                        SUM(CASE WHEN UPPER(i.stage_id) IN ('THANH_PHAM', 'THÀNH_PHẨM') THEN i.quantity ELSE 0 END) AS qty_done
+                    FROM Inventory i 
+                    LEFT JOIN Products p ON (CAST(p.id AS TEXT) = CAST(i.product_id AS TEXT) OR p.product_code = i.product_id)
+                    LEFT JOIN Production_Orders po ON po.po_number = i.lot_number
+                    WHERE i.quantity > 0 
+                    GROUP BY i.lot_number, p.product_code, po.month
+                `).all();
+                return new Response(JSON.stringify({ matrix: results }), { headers: corsHeaders });
+            }
+
+            // 7. STAGES (Đã cấu trúc lại Line)
+            if (url.pathname === '/api/stages' && request.method === 'GET') {
+                const stages = [
+                    { id: "CAT", line_id: "CUTTING", stage_name: "Cắt" }, { id: "NHIET_LUYEN", line_id: "CUTTING", stage_name: "Nhiệt luyện" }, { id: "DO_CUNG", line_id: "CUTTING", stage_name: "Độ cứng" },
+                    { id: "NC1", line_id: "NC", stage_name: "NC1" }, { id: "NC2", line_id: "NC", stage_name: "NC2" }, { id: "NC3", line_id: "NC", stage_name: "NC3" },
+                    { id: "MNC1", line_id: "MNC", stage_name: "MNC1" }, { id: "MNC2", line_id: "MNC", stage_name: "MNC2" }, { id: "MNC3", line_id: "MNC", stage_name: "MNC3" },
+                    { id: "GS", line_id: "GS_GV", stage_name: "GS" }, { id: "GV", line_id: "GS_GV", stage_name: "GV" },
+                    { id: "GP", line_id: "GP_GE_GI", stage_name: "GP" }, { id: "GE", line_id: "GP_GE_GI", stage_name: "GE" }, { id: "GI", line_id: "GP_GE_GI", stage_name: "GI" },
+                    { id: "LAP_RAP", line_id: "ASSY", stage_name: "Lắp ráp" }, { id: "DONG_THUNG", line_id: "ASSY", stage_name: "Đóng thùng" }, { id: "XUAT_GCN", line_id: "ASSY", stage_name: "Đi GCN" }, { id: "NHAN_GCN", line_id: "ASSY", stage_name: "Nhận GCN" }, { id: "KIEM_TRA", line_id: "KENSA", stage_name: "Kiểm tra" }
+                ];
+                return new Response(JSON.stringify({ data: stages }), { headers: corsHeaders });
+            }
+
+            // 8. LEADER PENDING (Linh hoạt cho Line mới)
+            if (url.pathname === '/api/leader/pending' && request.method === 'GET') {
+                const line_id = (url.searchParams.get('line_id') || "").trim().toUpperCase();
+                const lineStageMap = {
+                    'CUTTING': ['CAT', 'NHIET_LUYEN', 'DO_CUNG'], 'NC': ['NC1', 'NC2', 'NC3'], 'MNC': ['MNC1', 'MNC2', 'MNC3'],
+                    'GS_GV': ['GS', 'GV'], 'GP_GE_GI': ['GP', 'GE', 'GI'],
+                    'ASSY': ['LAP_RAP', 'DONG_THUNG', 'XUAT_GCN', 'NHAN_GCN'], 'KENSA': ['KIEM_TRA']
+                };
+                const validStages = lineStageMap[line_id] || [];
+                if (validStages.length === 0) return new Response(JSON.stringify({ data: [] }), { headers: corsHeaders });
+
+                const placeholders = validStages.map(() => '?').join(',');
+                const { results } = await env.DB.prepare(`
+                    SELECT i.lot_number as po_id, i.lot_number as po_number, COALESCE(p.product_code, i.product_id, 'UNKNOWN') as product_id, COALESCE(p.product_code, i.product_id, 'UNKNOWN') as product_code, i.stage_id as from_stage, i.quantity as qty_available, p.routing_map
+                    FROM Inventory i LEFT JOIN Products p ON (CAST(p.id AS TEXT) = CAST(i.product_id AS TEXT) OR UPPER(p.product_code) = UPPER(i.product_id))
+                    WHERE UPPER(i.stage_id) IN (${placeholders}) AND i.quantity > 0
+                `).bind(...validStages).all();
+
+                const formattedResults = results.map(row => {
+                    let to_stage_name = 'Hoàn thành (Nhập kho)';
+                    if (row.routing_map) {
+                        try {
+                            const rMap = JSON.parse(row.routing_map);
+                            const cIdx = rMap.findIndex(st => String(st.stage_id).toUpperCase() === String(row.from_stage).toUpperCase());
+                            if (cIdx !== -1 && cIdx < rMap.length - 1) to_stage_name = String(rMap[cIdx + 1].stage_id).toUpperCase();
+                        } catch(e){}
+                    }
+                    return { ...row, to_stage_name };
+                });
+                return new Response(JSON.stringify({ data: formattedResults }), { headers: corsHeaders });
+            }
+
+            // 9. API LẤY DANH SÁCH NG TỔNG HỢP (Đã fix lỗi tìm kiếm)
+            if (url.pathname === '/api/ng/list' && request.method === 'GET') {
+                const { results } = await env.DB.prepare(`
+                    SELECT i.lot_number, COALESCE(p.product_code, i.product_id, 'UNKNOWN') as product_code, SUM(i.quantity) as ng_qty
+                    FROM Inventory i LEFT JOIN Products p ON (CAST(p.id AS TEXT) = CAST(i.product_id AS TEXT) OR UPPER(p.product_code) = UPPER(i.product_id))
+                    WHERE (UPPER(i.stage_id) = 'NG' OR UPPER(i.stage_id) LIKE '%_NG') AND i.quantity > 0 GROUP BY i.lot_number, p.product_code
+                `).all();
+                return new Response(JSON.stringify({ data: results }), { headers: corsHeaders });
+            }
+
+            // 10. API LỊCH SỬ GIAO DỊCH (Đã thêm Product Code để tìm kiếm)
+            if (url.pathname === '/api/history' && request.method === 'GET') {
+                const { results } = await env.DB.prepare(`
+                    SELECT t.timestamp, u.full_name, u.username, t.po_id, t.type, t.qty, t.from_stage, t.to_stage,
+                           COALESCE((SELECT p.product_code FROM Inventory i LEFT JOIN Products p ON (CAST(p.id AS TEXT) = CAST(i.product_id AS TEXT) OR p.product_code = i.product_id) WHERE i.lot_number = t.po_id LIMIT 1), 'UNKNOWN') as product_code
+                    FROM Transactions_Log t LEFT JOIN Users u ON t.user_id = u.id
+                    ORDER BY t.timestamp DESC LIMIT 500
+                `).all();
+                return new Response(JSON.stringify({ data: results }), { headers: corsHeaders });
+            }
+
+            return new Response(JSON.stringify({ error: "Endpoint not found" }), { status: 404, headers: corsHeaders });
+        } catch (error) { return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: corsHeaders }); }
+    } 
+};

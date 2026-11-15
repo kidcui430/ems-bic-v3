@@ -1,0 +1,25 @@
+{
+  "id": "/",
+  "name": "Quản Lý Luân Chuyển Sản Xuất",
+  "short_name": "EMS",
+  "description": "Phần mềm quản lý luân chuyển công đoạn sản xuất và theo dõi WIP/NG",
+  "start_url": "/index.html",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#193958",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "logo192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "logo512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

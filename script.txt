@@ -1,0 +1,748 @@
+const API_BASE_URL = "https://api-ems-bic.quangtriet430.workers.dev";
+let currentUser = null;
+let globalStages = [];
+let currentMatrixData = null;
+let leaderPOsCache = [];
+let productsCache = [];
+let adminPollingInterval = null;
+let leaderPollingInterval = null;
+let tempUserForPassChange = null;
+
+window.addEventListener("DOMContentLoaded", () => {
+  setDefaultDates();
+  const savedUser = localStorage.getItem("ems_user");
+  if (savedUser) {
+    currentUser = JSON.parse(savedUser);
+    navigateToRoleScreen();
+  }
+});
+
+document
+  .getElementById("login-form")
+  .addEventListener("submit", async function (e) {
+    e.preventDefault();
+    const usernameInput = document.getElementById("username").value;
+    const passwordInput = document.getElementById("password").value;
+    const errorMsg = document.getElementById("login-error");
+
+    try {
+      errorMsg.classList.add("hidden");
+      const response = await fetch(`${API_BASE_URL}/api/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: usernameInput,
+          password: passwordInput,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        errorMsg.textContent = data.error || "Lỗi đăng nhập!";
+        errorMsg.classList.remove("hidden");
+        return;
+      }
+      if (data.user.password_hash === "000") {
+        tempUserForPassChange = data.user;
+        document.getElementById("change-pass-modal").classList.remove("hidden");
+        return;
+      }
+      currentUser = data.user;
+      localStorage.setItem("ems_user", JSON.stringify(currentUser));
+      navigateToRoleScreen();
+    } catch (error) {
+      errorMsg.textContent = "Không thể kết nối đến máy chủ API.";
+      errorMsg.classList.remove("hidden");
+    }
+  });
+
+window.submitNewPassword = async function () {
+  const newPass = document.getElementById("new-password").value;
+  if (newPass.length < 4) return alert("Mật khẩu phải từ 4 ký tự trở lên!");
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/change-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: tempUserForPassChange.username,
+        new_password: newPass,
+      }),
+    });
+    if (res.ok) {
+      alert("Đổi mật khẩu thành công! Chào mừng bạn.");
+      document.getElementById("change-pass-modal").classList.add("hidden");
+      tempUserForPassChange.password_hash = newPass;
+      currentUser = tempUserForPassChange;
+      localStorage.setItem("ems_user", JSON.stringify(currentUser));
+      navigateToRoleScreen();
+    } else {
+      alert("Đã xảy ra lỗi khi lưu mật khẩu.");
+    }
+  } catch (e) {
+    alert("Lỗi máy chủ khi đổi mật khẩu.");
+  }
+};
+
+function logout() {
+  currentUser = null;
+  localStorage.removeItem("ems_user");
+  if (adminPollingInterval) clearInterval(adminPollingInterval);
+  if (leaderPollingInterval) clearInterval(leaderPollingInterval);
+  document.getElementById("login-form").reset();
+  document.querySelectorAll(".screen").forEach((s) => {
+    s.classList.remove("active");
+    s.classList.add("hidden");
+  });
+  document.getElementById("login-screen").classList.remove("hidden");
+  document.getElementById("login-screen").classList.add("active");
+}
+
+function navigateToRoleScreen() {
+  document.querySelectorAll(".screen").forEach((s) => {
+    s.classList.remove("active");
+    s.classList.add("hidden");
+  });
+  if (adminPollingInterval) clearInterval(adminPollingInterval);
+  if (leaderPollingInterval) clearInterval(leaderPollingInterval);
+  const displayName = currentUser.full_name || currentUser.username;
+
+  if (currentUser.role === "ADMIN") {
+    document.getElementById("admin-screen").classList.remove("hidden");
+    document.getElementById("admin-screen").classList.add("active");
+    document.getElementById("admin-name").textContent = displayName;
+    loadNGDropdownsThorough().then(() => {
+      fetchProductsList();
+    });
+    switchTab("admin", "tab-matrix");
+    adminPollingInterval = setInterval(fetchMatrixReport, 5000);
+  } else if (currentUser.role === "LEADER") {
+    document.getElementById("leader-screen").classList.remove("hidden");
+    document.getElementById("leader-screen").classList.add("active");
+    document.getElementById("leader-name").textContent = displayName;
+    loadNGDropdownsThorough().then(() => {
+      const myStages = globalStages.filter(
+        (s) => s.line_id === currentUser.line_id,
+      );
+      if (myStages.length > 0) {
+        document.getElementById("leader-line").textContent = myStages
+          .map((s) => s.stage_name)
+          .join(", ");
+      } else {
+        document.getElementById("leader-line").textContent =
+          currentUser.line_id;
+      }
+      switchTab("leader", "tab-wip");
+      fetchPendingPOs();
+    });
+    if (currentUser.line_id === "ASSY") {
+      document.getElementById("btn-outsource")?.classList.remove("hidden");
+    }
+    leaderPollingInterval = setInterval(fetchPendingPOs, 5000);
+  }
+}
+
+function switchTab(role, tabId) {
+  let container =
+    role === "admin"
+      ? document.getElementById("admin-screen")
+      : document.getElementById("leader-screen");
+  let btnClass =
+    role === "admin" ? ".sidebar .tab-btn" : ".tabs-mobile .tab-btn-mobile";
+  let tabClass =
+    role === "admin"
+      ? ".app-body .tab-content"
+      : ".content-mobile .tab-content";
+
+  container.querySelectorAll(tabClass).forEach((tab) => {
+    tab.classList.remove("active");
+    tab.classList.add("hidden");
+  });
+  container.querySelectorAll(btnClass).forEach((btn) => {
+    btn.classList.remove("active");
+  });
+
+  document.getElementById(tabId).classList.remove("hidden");
+  document.getElementById(tabId).classList.add("active");
+  if (window.event && window.event.currentTarget)
+    window.event.currentTarget.classList.add("active");
+
+  if (role === "admin" && tabId === "tab-matrix") fetchMatrixReport();
+  if (role === "admin" && tabId === "tab-history") fetchHistoryLog();
+}
+
+async function loadNGDropdownsThorough() {
+  const fallbackStages = [{ id: "CAT", stage_name: "Cắt" }];
+  try {
+    const stageRes = await fetch(`${API_BASE_URL}/api/stages`);
+    const stageData = await stageRes.json();
+    globalStages =
+      stageData.data && stageData.data.length > 0
+        ? stageData.data
+        : fallbackStages;
+  } catch (e) {
+    globalStages = fallbackStages;
+  }
+
+  let stageOpts = '<option value="">-- Chọn công đoạn --</option>';
+  globalStages.forEach((col) => {
+    stageOpts += `<option value="${col.id}">${col.stage_name}</option>`;
+  });
+  if (document.getElementById("ng-current-stage"))
+    document.getElementById("ng-current-stage").innerHTML = stageOpts;
+  if (document.getElementById("ng-return-stage"))
+    document.getElementById("ng-return-stage").innerHTML = stageOpts;
+
+  try {
+    const ngRes = await fetch(`${API_BASE_URL}/api/ng/list`);
+    const ngData = await ngRes.json();
+    const poSelect = document.getElementById("ng-po-select");
+    if (poSelect) {
+      let poOpts = '<option value="">-- Chọn Lô / PO --</option>';
+      if (ngData.data && ngData.data.length > 0) {
+        ngData.data.forEach((po) => {
+          poOpts += `<option value="${po.lot_number}">${po.lot_number} [${po.product_code}] - Lỗi: ${po.ng_qty}</option>`;
+        });
+      } else {
+        poOpts = '<option value="">-- Hiện không có hàng NG nào --</option>';
+      }
+      poSelect.innerHTML = poOpts;
+    }
+  } catch (e) {
+    console.error("Lỗi nạp danh sách NG:", e);
+  }
+}
+
+let routingStepCount = 0;
+window.addRoutingStep = function () {
+  routingStepCount++;
+  const container = document.getElementById("routing-builder");
+  const stepDiv = document.createElement("div");
+  stepDiv.style.display = "flex";
+  stepDiv.style.gap = "10px";
+  stepDiv.style.marginBottom = "10px";
+  stepDiv.innerHTML = `<span style="font-weight:bold; min-width: 70px;">Bước ${routingStepCount}:</span><select class="routing-stage-select" required style="padding: 8px; flex: 1;"><option value="">-- Chọn công đoạn --</option>${globalStages.map((s) => `<option value="${s.id}">${s.stage_name}</option>`).join("")}</select><button type="button" class="btn btn-danger" onclick="this.parentElement.remove()">Xóa</button>`;
+  container.appendChild(stepDiv);
+};
+
+const formCreateProduct = document.getElementById("form-create-product");
+if (formCreateProduct) {
+  formCreateProduct.addEventListener("submit", async function (e) {
+    e.preventDefault();
+    const routingMap = [];
+    document.querySelectorAll(".routing-stage-select").forEach((sel, idx) => {
+      if (sel.value) routingMap.push({ order: idx + 1, stage_id: sel.value });
+    });
+    if (routingMap.length === 0)
+      return alert("Vui lòng thêm ít nhất 1 công đoạn!");
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/products`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          product_code: document
+            .getElementById("md-product-code")
+            .value.trim()
+            .toUpperCase(),
+          product_name: document.getElementById("md-product-name").value.trim(),
+          routing_map: routingMap,
+        }),
+      });
+      if (response.ok) {
+        alert("Khởi tạo mã hàng thành công!");
+        formCreateProduct.reset();
+        document.getElementById("routing-builder").innerHTML = "";
+        routingStepCount = 0;
+        fetchProductsList();
+      } else {
+        const d = await response.json();
+        alert("Lỗi: " + d.error);
+      }
+    } catch (error) {
+      alert("Lỗi kết nối API!");
+    }
+  });
+}
+
+async function fetchProductsList() {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/products`);
+    const data = await response.json();
+    if (data.products) {
+      productsCache = data.products;
+      document.getElementById("product-suggestions").innerHTML = productsCache
+        .map(
+          (p) => `<option value="${p.product_code}">${p.product_name}</option>`,
+        )
+        .join("");
+      renderMasterTable(productsCache);
+    }
+  } catch (e) {
+    console.error("Lỗi:", e);
+  }
+}
+
+function renderMasterTable(data) {
+  const container = document.getElementById("master-list-container");
+  if (!container) return;
+  let html = `<table class="matrix-table" style="font-size: 13px;"><thead><tr><th>Mã Hàng</th><th>Tên</th><th>Lộ trình (Trạm)</th></tr></thead><tbody>`;
+  data.forEach((p) => {
+    let routingText = "";
+    try {
+      routingText = JSON.parse(p.routing_map)
+        .map((step) => {
+          const obj = globalStages.find((st) => st.id == step.stage_id);
+          return obj ? obj.stage_name : step.stage_id;
+        })
+        .join(" ➔ ");
+    } catch (e) {
+      routingText = "Lỗi";
+    }
+    html += `<tr><td style="font-weight:bold; color:var(--navy);">${p.product_code}</td><td>${p.product_name}</td><td>${routingText}</td></tr>`;
+  });
+  container.innerHTML = html + `</tbody></table>`;
+}
+
+const formCreatePO = document.getElementById("form-create-po");
+if (formCreatePO) {
+  formCreatePO.addEventListener("submit", async function (e) {
+    e.preventDefault();
+    const splitQty = parseInt(document.getElementById("po-split").value);
+    const totalQty = parseInt(document.getElementById("po-total").value);
+    if (splitQty > totalQty) return alert("Kích thước 1 LOT quá lớn!");
+    const lots = [];
+    let remaining = totalQty;
+    let counter = 1;
+    while (remaining > 0) {
+      const qty = remaining > splitQty ? splitQty : remaining;
+      lots.push({
+        po_number: `${document.getElementById("po-prefix").value.trim().toUpperCase()}-${String(counter).padStart(2, "0")}`,
+        qty,
+      });
+      remaining -= qty;
+      counter++;
+    }
+    if (!confirm(`Sẽ chẻ thành ${lots.length} LOT. Tiếp tục?`)) return;
+
+    for (const lot of lots) {
+      await fetch(`${API_BASE_URL}/api/po/create`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          po_number: lot.po_number,
+          product_code: document
+            .getElementById("product-code")
+            .value.trim()
+            .toUpperCase(),
+          production_date: document.getElementById("po-date").value,
+          total_qty: lot.qty,
+          user_id: currentUser.id,
+        }),
+      });
+    }
+    alert("Cấp phát xong!");
+    formCreatePO.reset();
+    fetchMatrixReport();
+  });
+}
+
+async function fetchMatrixReport() {
+  if (!currentUser || currentUser.role !== "ADMIN") return;
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/dashboard/matrix`);
+    const data = await response.json();
+    if (!data.matrix) return;
+    const columns = globalStages;
+    const rows = data.matrix.map((row) => {
+      const stages = {};
+      columns.forEach((c) => {
+        const colLower = c.id.toLowerCase();
+        stages[c.id] = {
+          good: row[`qty_${colLower}`] || 0,
+          ng: row[`ng_${colLower}`] || 0,
+          date: row[`date_${colLower}`],
+        };
+      });
+      return {
+        production_date: row.production_date,
+        po_number: row.lot_number,
+        product_code: row.product_code,
+        total_qty: row.total_qty,
+        finished_qty: row.qty_done,
+        stages,
+      };
+    });
+    currentMatrixData = { columns, rows };
+    filterMatrix();
+  } catch (error) {}
+}
+
+function renderMatrixTable(rows) {
+  const container = document.getElementById("matrix-table-container");
+  if (!currentMatrixData || !container) return;
+  const lineColors = {
+    CUTTING: "#ffebee",
+    NC: "#e3f2fd",
+    MNC: "#e8f5e9",
+    GS_GV: "#fff3e0",
+    GP_GE_GI: "#f3e5f5",
+    ASSY: "#fffde7",
+    KENSA: "#eceff1",
+  };
+
+  // TÁCH ĐÔI BẢNG MATRIX: CỘT OK & NG
+  let tableHTML = `<table class="matrix-table" id="export-table"><thead><tr>`;
+  tableHTML += `<th rowspan="2" style="vertical-align: middle;">Ngày</th><th rowspan="2" style="vertical-align: middle;">Số LOT</th><th rowspan="2" style="vertical-align: middle;">Mã Hàng</th><th rowspan="2" style="vertical-align: middle;">Tổng</th>`;
+
+  currentMatrixData.columns.forEach((col) => {
+    tableHTML += `<th colspan="2" style="background-color: ${lineColors[col.line_id] || "transparent"}; border-bottom:1px solid #ccc; text-align:center;">${col.stage_name}</th>`;
+  });
+  tableHTML += `<th rowspan="2" style="vertical-align: middle;">KHO</th></tr><tr>`;
+  currentMatrixData.columns.forEach((col) => {
+    tableHTML += `<th style="background-color: ${lineColors[col.line_id] || "transparent"}; color: #48BB78; font-size:11px;">OK</th><th style="background-color: ${lineColors[col.line_id] || "transparent"}; color: #ea580c; font-size:11px; border-right: 2px solid rgba(0,0,0,0.1);">NG</th>`;
+  });
+  tableHTML += `</tr></thead><tbody>`;
+
+  rows.forEach((row) => {
+    tableHTML += `<tr><td>${row.production_date || "-"}</td><td style="font-weight:bold; color:var(--navy);">${row.po_number}</td><td>${row.product_code}</td><td style="font-weight:bold;">${row.total_qty}</td>`;
+    currentMatrixData.columns.forEach((col) => {
+      const stg = row.stages[col.id];
+      let timeStr = "Chưa thao tác";
+      if (stg && stg.date) {
+        timeStr = new Date(stg.date.replace(" ", "T") + "Z")
+          .toLocaleString("vi-VN", {
+            timeZone: "Asia/Ho_Chi_Minh",
+            hour12: false,
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          })
+          .replace(",", "");
+      }
+
+      // CỘT OK
+      tableHTML +=
+        stg.good > 0
+          ? `<td class="has-tooltip" data-time="${timeStr}" style="background-color: ${lineColors[col.line_id] || "transparent"}; text-align:center;"><span class="badge-good">${stg.good}</span></td>`
+          : `<td style="background-color: ${lineColors[col.line_id] || "transparent"}; text-align:center;"><span class="cell-empty">-</span></td>`;
+      // CỘT NG
+      tableHTML +=
+        stg.ng > 0
+          ? `<td style="background-color: ${lineColors[col.line_id] || "transparent"}; text-align:center; border-right: 2px solid rgba(0,0,0,0.1);"><span style="background:#ea580c; color:#fff; border-radius:4px; padding: 2px 6px; font-size: 11px;">${stg.ng}</span></td>`
+          : `<td style="background-color: ${lineColors[col.line_id] || "transparent"}; text-align:center; border-right: 2px solid rgba(0,0,0,0.1);"><span class="cell-empty">-</span></td>`;
+    });
+    tableHTML += `<td style="font-weight:bold; color:#48BB78;">${row.finished_qty > 0 ? row.finished_qty : "-"}</td></tr>`;
+  });
+  container.innerHTML = tableHTML + `</tbody></table>`;
+}
+
+window.filterMatrix = function () {
+  if (!currentMatrixData) return;
+  const dateVal = (
+    document.getElementById("search-date")?.value || ""
+  ).toLowerCase();
+  const lotVal = (
+    document.getElementById("search-lot")?.value || ""
+  ).toLowerCase();
+  const codeVal = (
+    document.getElementById("search-code")?.value || ""
+  ).toLowerCase();
+  renderMatrixTable(
+    currentMatrixData.rows.filter(
+      (r) =>
+        (r.production_date || "").toLowerCase().includes(dateVal) &&
+        (r.po_number || "").toLowerCase().includes(lotVal) &&
+        (r.product_code || "").toLowerCase().includes(codeVal),
+    ),
+  );
+};
+
+// --- GỌI LỊCH SỬ TỪ WORKER ---
+async function fetchHistoryLog() {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/history`);
+    const result = await res.json();
+    const tbody = document.getElementById("history-tbody");
+    if (!tbody) return;
+
+    if (result.data && result.data.length > 0) {
+      tbody.innerHTML = result.data
+        .map((log) => {
+          const time = new Date(
+            log.timestamp.replace(" ", "T") + "Z",
+          ).toLocaleString("vi-VN", {
+            timeZone: "Asia/Ho_Chi_Minh",
+            hour12: false,
+          });
+          const typeStyle =
+            log.type === "PASS"
+              ? "color:#48BB78; font-weight:bold;"
+              : "color:#ea580c; font-weight:bold;";
+          const nameStr = log.full_name
+            ? `${log.full_name} (${log.username})`
+            : log.username;
+          return `<tr><td>${time}</td><td>${nameStr}</td><td style="color:var(--navy); font-weight:bold;">${log.po_id}</td><td style="${typeStyle}">${log.type}</td><td>${log.qty}</td><td>${log.from_stage}</td><td>${log.to_stage}</td></tr>`;
+        })
+        .join("");
+    } else {
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align: center;">Chưa có giao dịch nào!</td></tr>`;
+    }
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+// Biến lưu trữ dữ liệu cũ để so sánh ngầm
+let lastPendingDataString = "";
+
+// Biến lưu trữ dữ liệu cũ để so sánh ngầm
+let lastPendingDataString = "";
+
+async function fetchPendingPOs() {
+  if (!currentUser || currentUser.role !== "LEADER") return;
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/api/leader/pending?line_id=${currentUser.line_id}`,
+    );
+    const result = await response.json();
+
+    const newDataString = JSON.stringify(result.data || []);
+    // Nếu không có thay đổi, bỏ qua không làm mới màn hình
+    if (newDataString === lastPendingDataString) return;
+
+    lastPendingDataString = newDataString;
+    leaderPOsCache = result.data || [];
+
+    // Cập nhật dữ liệu vào 2 ô Tìm kiếm mới
+    populateLeaderSearchDropdowns();
+  } catch (error) {
+    console.error("Lỗi cập nhật hàng chờ:", error);
+  }
+}
+
+// HÀM MỚI 1: Nạp danh sách Mã Hàng vào Khung 1
+function populateLeaderSearchDropdowns() {
+  const productSelect = document.getElementById("search-leader-product");
+  if (!productSelect) {
+    filterLeaderPOs();
+    return;
+  }
+
+  // Tự động quét tìm các Mã Hàng đang kẹt ở trạm này (loại bỏ trùng lặp)
+  const uniqueProducts = [
+    ...new Set(leaderPOsCache.map((po) => po.product_code)),
+  ].filter(Boolean);
+  const currentProd = productSelect.value;
+
+  productSelect.innerHTML =
+    '<option value="">-- Tất cả Mã Hàng --</option>' +
+    uniqueProducts.map((p) => `<option value="${p}">${p}</option>`).join("");
+
+  // Giữ nguyên lựa chọn cũ nếu có
+  if (uniqueProducts.includes(currentProd)) productSelect.value = currentProd;
+
+  updateLeaderLotOptions();
+}
+
+// HÀM MỚI 2: Xử lý phụ thuộc Khung 2 (Chỉ hiện LOT của mã hàng đã chọn)
+window.updateLeaderLotOptions = function () {
+  const productSelect = document.getElementById("search-leader-product");
+  const lotSelect = document.getElementById("search-leader-lot");
+  if (!productSelect || !lotSelect) return;
+
+  const selectedProduct = productSelect.value;
+
+  // Lọc danh sách LOT dựa trên Mã Hàng đã chọn ở Khung 1
+  let availableLots = leaderPOsCache;
+  if (selectedProduct) {
+    availableLots = leaderPOsCache.filter(
+      (po) => po.product_code === selectedProduct,
+    );
+  }
+
+  // Lấy danh sách Số LOT duy nhất
+  const uniqueLots = [
+    ...new Set(availableLots.map((po) => po.po_number)),
+  ].filter(Boolean);
+  const currentLot = lotSelect.value;
+
+  lotSelect.innerHTML =
+    '<option value="">-- Tất cả Số LOT --</option>' +
+    uniqueLots.map((l) => `<option value="${l}">${l}</option>`).join("");
+
+  if (uniqueLots.includes(currentLot)) lotSelect.value = currentLot;
+
+  // Sau khi nạp xong LOT thì gọi lệnh lọc màn hình chính
+  filterLeaderPOs();
+};
+
+// ĐÃ SỬA: Lọc danh sách hàng hiển thị dựa trên cả 2 Khung
+window.filterLeaderPOs = function () {
+  const prodVal = document.getElementById("search-leader-product")?.value || "";
+  const lotVal = document.getElementById("search-leader-lot")?.value || "";
+
+  const filtered = leaderPOsCache.filter((po) => {
+    const matchProd = prodVal === "" || po.product_code === prodVal;
+    const matchLot = lotVal === "" || po.po_number === lotVal;
+    return matchProd && matchLot;
+  });
+
+  renderLeaderPOs(filtered);
+};
+
+// ĐÃ SỬA: Lọc danh sách hàng hiển thị dựa trên cả 2 Khung
+window.filterLeaderPOs = function () {
+  const prodVal = document.getElementById("search-leader-product")?.value || "";
+  const lotVal = document.getElementById("search-leader-lot")?.value || "";
+
+  const filtered = leaderPOsCache.filter((po) => {
+    const matchProd = prodVal === "" || po.product_code === prodVal;
+    const matchLot = lotVal === "" || po.po_number === lotVal;
+    return matchProd && matchLot;
+  });
+
+  renderLeaderPOs(filtered);
+};
+
+function renderLeaderPOs(data) {
+  const selectEl = document.getElementById("po-select");
+  const wipContainer = document.getElementById("tab-wip");
+  if (!selectEl || !wipContainer) return;
+
+  // BƯỚC 1: Bắt chết ID của PO đang được chọn (Chống mất kết nối khi số lượng thay đổi)
+  let currentSelectedPoId = null;
+  if (selectEl.value) {
+    try {
+      currentSelectedPoId = JSON.parse(selectEl.value).po_id;
+    } catch (e) {}
+  }
+
+  selectEl.innerHTML = '<option value="">-- Chọn PO để xử lý --</option>';
+  wipContainer.innerHTML = "";
+
+  const stageNameDict = {
+    CAT: "Cắt",
+    NHIET_LUYEN: "Nhiệt luyện",
+    DO_CUNG: "Độ cứng",
+    NC1: "NC1",
+    NC2: "NC2",
+    NC3: "NC3",
+    MNC1: "MNC1",
+    MNC2: "MNC2",
+    MNC3: "MNC3",
+    GS: "GS",
+    GV: "GV",
+    GP: "GP",
+    GE: "GE",
+    GI: "GI",
+    LAP_RAP: "Lắp ráp",
+    DONG_THUNG: "Đóng thùng",
+    XUAT_GCN: "Đi GCN",
+    NHAN_GCN: "Nhận GCN",
+    KIEM_TRA: "Kiểm tra",
+  };
+
+  if (data.length > 0) {
+    data.forEach((po) => {
+      const currentStageName =
+        stageNameDict[po.from_stage.toUpperCase()] || po.from_stage;
+      const toStageName = stageNameDict[po.to_stage_name] || po.to_stage_name;
+
+      const optionValue = JSON.stringify({
+        po_id: po.po_id,
+        product_id: po.product_id,
+        from_stage: po.from_stage,
+        max_qty: po.qty_available,
+      });
+
+      const optionText = `${po.po_number} [${po.product_code}] - Tồn: ${po.qty_available} | ➔ Tới: ${toStageName}`;
+      const option = document.createElement("option");
+      option.value = optionValue;
+      option.textContent = optionText;
+      selectEl.appendChild(option);
+
+      const card = document.createElement("div");
+      card.className = "card";
+      card.style.borderLeft = "4px solid var(--lime)";
+      card.innerHTML = `
+                <h3 style="color: var(--navy); margin-bottom: 8px;">${po.po_number} <span style="font-size: 14px; color: var(--gray-dark);">(${po.product_code})</span></h3>
+                <p style="margin-bottom: 5px;">📦 Đang chờ: <strong class="text-primary" style="font-size: 18px;">${po.qty_available}</strong></p>
+                <p style="font-size: 14px;">📍 Hiện tại: <strong style="color: var(--maroon);">${currentStageName}</strong></p>
+                <p style="font-size: 14px;">➔ Sau khi PASS sẽ đến: <strong>${toStageName}</strong></p>
+            `;
+      wipContainer.appendChild(card);
+    });
+
+    // BƯỚC 2: Khôi phục lại đúng PO đang được chọn dựa trên po_id (Dù số lượng tồn thay đổi vẫn giữ được)
+    if (currentSelectedPoId) {
+      const options = Array.from(selectEl.options);
+      const targetOpt = options.find((opt) => {
+        if (!opt.value) return false;
+        try {
+          return JSON.parse(opt.value).po_id === currentSelectedPoId;
+        } catch (e) {
+          return false;
+        }
+      });
+      if (targetOpt) {
+        selectEl.value = targetOpt.value;
+      }
+    }
+  } else {
+    selectEl.innerHTML =
+      '<option value="">-- Không có hàng thỏa mãn --</option>';
+    wipContainer.innerHTML = `<div class="card" style="text-align: center; color: var(--gray-dark); padding: 30px;">Không có lô hàng nào kẹt tại công đoạn bạn quản lý.</div>`;
+  }
+}
+window.filterLeaderPOs = function () {
+  const val = (
+    document.getElementById("search-leader-po")?.value || ""
+  ).toLowerCase();
+  renderLeaderPOs(
+    leaderPOsCache.filter(
+      (po) =>
+        (po.po_number || "").toLowerCase().includes(val) ||
+        (po.product_code || "").toLowerCase().includes(val),
+    ),
+  );
+};
+window.submitMove = async function () {
+  const v = document.getElementById("po-select")?.value;
+  if (!v) return alert("Chọn PO!");
+  const d = JSON.parse(v);
+  const p = parseInt(document.getElementById("qty-pass").value) || 0;
+  const n = parseInt(document.getElementById("qty-ng").value) || 0;
+  if (p + n <= 0) return alert("Nhập số lượng!");
+  if (p + n > d.max_qty) return alert("Vượt tồn kho!");
+  try {
+    const r = await fetch(`${API_BASE_URL}/api/move`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        lot_number: d.po_id,
+        product_id: d.product_id,
+        from_stage: d.from_stage,
+        qty_pass: p,
+        qty_ng: n,
+        user_id: currentUser.id,
+      }),
+    });
+    if (r.ok) {
+      alert("Thành công!");
+      document.getElementById("qty-pass").value = 0;
+      document.getElementById("qty-ng").value = 0;
+      fetchPendingPOs();
+    } else {
+      alert((await r.json()).error);
+    }
+  } catch (e) {
+    alert("Lỗi mạng!");
+  }
+};
+function setDefaultDates() {
+  const d = new Date().toISOString().split("T")[0];
+  if (document.getElementById("po-date"))
+    document.getElementById("po-date").value = d;
+  if (document.getElementById("action-date"))
+    document.getElementById("action-date").value = d;
+}
