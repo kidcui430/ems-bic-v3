@@ -79,10 +79,17 @@
     <!-- MÀN HÌNH ADMIN (Giao diện Desktop & Responsive) -->
     <div id="admin-screen" class="screen hidden">
       <header class="navbar">
-        <div class="nav-brand">Hệ Thống Quản Lý Sản Xuất (Admin)</div>
+        <div class="nav-brand">Luân chuyển Sản Xuất (VP)</div>
         <div class="nav-user">
           Xin chào, <strong id="admin-name">Admin</strong> |
-          <a href="#" onclick="logout(); return false;">Thoát</a>
+          <a
+            href="#"
+            onclick="
+              logout();
+              return false;
+            "
+            >Thoát</a
+          >
         </div>
       </header>
       <div class="app-body">
@@ -93,7 +100,15 @@
             data-tab="tab-master"
             onclick="switchTab('admin', 'tab-master', this)"
           >
-            Mã Hàng &amp; Công Đoạn
+            Quản Lý Mã Hàng
+          </button>
+          <button
+            type="button"
+            class="tab-btn"
+            data-tab="tab-stages"
+            onclick="switchTab('admin', 'tab-stages', this)"
+          >
+            Quản Lý Công Đoạn
           </button>
           <button
             type="button"
@@ -130,9 +145,8 @@
         </aside>
 
         <main class="content">
-          <!-- TAB 1: QUẢN LÝ MÃ HÀNG & CÔNG ĐOẠN SẢN XUẤT -->
+          <!-- TAB 1: QUẢN LÝ MÃ HÀNG & LỘ TRÌNH (RIÊNG BIỆT) -->
           <div id="tab-master" class="tab-content hidden">
-            <!-- PHẦN A: QUẢN LÝ MÃ HÀNG & LỘ TRÌNH -->
             <div class="master-grid">
               <!-- CỘT TRÁI: FORM TẠO / SỬA MÃ HÀNG -->
               <div class="card form-card master-col-left">
@@ -229,116 +243,143 @@
                 />
                 <div
                   id="master-list-container"
-                  style="max-height: 430px; overflow-y: auto"
+                  style="max-height: 540px; overflow-y: auto"
                 >
                   <p style="padding: 12px">Đang tải dữ liệu...</p>
                 </div>
               </div>
             </div>
+          </div>
 
-            <!-- PHẦN B: QUẢN LÝ DANH MỤC CÔNG ĐOẠN SẢN XUẤT (THÊM / SỬA / XÓA / SẮP XẾP) -->
-            <div class="card form-card" style="margin-top: 8px">
-              <div class="card-header-flex">
-                <div>
-                  <h2>Quản Lý Công Đoạn Sản Xuất</h2>
-                  <p style="font-size: 12px; color: var(--muted)">
-                    Thêm mới, đổi tên, gán Line phụ trách, sắp xếp thứ tự hiển
-                    thị trên bảng Báo Cáo hoặc xóa công đoạn không còn sử dụng.
-                  </p>
+          <!-- TAB 2: QUẢN LÝ CÔNG ĐOẠN SẢN XUẤT & LINE PHỤ TRÁCH (TÁCH RIÊNG) -->
+          <div id="tab-stages" class="tab-content hidden">
+            <div class="master-grid">
+              <!-- CỘT TRÁI: FORM THÊM / SỬA CÔNG ĐOẠN -->
+              <div class="card form-card master-col-left">
+                <div class="card-header-flex">
+                  <div>
+                    <h2 id="stage-form-title">Thêm / Sửa Công Đoạn</h2>
+                    <p style="font-size: 12px; color: var(--muted)">
+                      Khai báo công đoạn và gán cho Line (Leader).
+                    </p>
+                  </div>
+                  <span id="stage-edit-badge" class="badge-edit hidden"
+                    >Đang sửa</span
+                  >
                 </div>
-                <span id="stage-edit-badge" class="badge-edit hidden"
-                  >Đang sửa công đoạn</span
-                >
+
+                <form id="form-stage-manager" style="margin-top: 10px">
+                  <input type="hidden" id="stg-edit-mode" value="create" />
+                  <input type="hidden" id="stg-original-id" value="" />
+                  <div class="input-group">
+                    <label for="stg-id"
+                      >Mã Công Đoạn (ID viết liền, không dấu)</label
+                    >
+                    <input
+                      type="text"
+                      id="stg-id"
+                      required
+                      placeholder="VD: CAT, NC1, BARRY..."
+                      style="text-transform: uppercase"
+                    />
+                  </div>
+                  <div class="input-group">
+                    <label for="stg-name">Tên Hiển Thị Công Đoạn</label>
+                    <input
+                      type="text"
+                      id="stg-name"
+                      required
+                      placeholder="VD: Cắt, Tiện NC1, Bavia (Barry)..."
+                    />
+                  </div>
+                  <div class="input-group">
+                    <label for="stg-line"
+                      >Line Quản Lý (Leader Line nào sẽ thấy mã hàng line
+                      mình)</label
+                    >
+                    <input
+                      type="text"
+                      id="stg-line"
+                      required
+                      list="line-suggestions"
+                      placeholder="Chọn hoặc gõ mã Line (VD: BARRY, ASSY, NC...)"
+                      style="text-transform: uppercase"
+                    />
+                    <datalist id="line-suggestions">
+                      <option value="CUTTING">
+                        Line Cutting (Cắt / Nhiệt luyện / Độ cứng)
+                      </option>
+                      <option value="NC">Line NC (NC1, NC2, NC3)</option>
+                      <option value="MNC">Line MNC (MNC1, MNC2, MNC3)</option>
+                      <option value="GS_GV">Line GS-GV</option>
+                      <option value="GP_GE_GI">Line GP-GE-GI</option>
+                      <option value="BARRY">Line Barry (Bavia)</option>
+                      <option value="ASSY">
+                        Line Assy (Lắp ráp / Đóng thùng / GCN)
+                      </option>
+                      <option value="KENSA">Line Kensa (Kiểm tra)</option>
+                    </datalist>
+                  </div>
+
+                  <div style="display: flex; gap: 8px">
+                    <button
+                      type="submit"
+                      id="btn-save-stage"
+                      class="btn btn-primary"
+                      style="flex: 1"
+                    >
+                      + Lưu Công Đoạn
+                    </button>
+                    <button
+                      type="button"
+                      id="btn-cancel-stage-edit"
+                      class="btn btn-secondary hidden"
+                      onclick="resetStageForm()"
+                    >
+                      Hủy sửa
+                    </button>
+                  </div>
+                </form>
               </div>
 
-              <div class="master-grid" style="margin-top: 14px">
-                <!-- FORM THÊM / SỬA CÔNG ĐOẠN -->
-                <div style="flex: 1; min-width: 280px">
-                  <form id="form-stage-manager">
-                    <input type="hidden" id="stg-edit-mode" value="create" />
-                    <input type="hidden" id="stg-original-id" value="" />
-                    <div class="input-group">
-                      <label for="stg-id"
-                        >Mã Công Đoạn (ID viết liền, không dấu)</label
-                      >
-                      <input
-                        type="text"
-                        id="stg-id"
-                        required
-                        placeholder="VD: CAT, NC1, BARRY..."
-                        style="text-transform: uppercase"
-                      />
-                    </div>
-                    <div class="input-group">
-                      <label for="stg-name">Tên Hiển Thị Công Đoạn</label>
-                      <input
-                        type="text"
-                        id="stg-name"
-                        required
-                        placeholder="VD: Cắt, Tiện NC1, Bavia..."
-                      />
-                    </div>
-                    <div class="input-group">
-                      <label for="stg-line">Mã Line Quản Lý (Cho Leader)</label>
-                      <input
-                        type="text"
-                        id="stg-line"
-                        required
-                        list="line-suggestions"
-                        placeholder="VD: CUTTING, NC, MNC, GS_GV, GP_GE_GI, ASSY, KENSA..."
-                        style="text-transform: uppercase"
-                      />
-                      <datalist id="line-suggestions">
-                        <option value="CUTTING">Tổ Cắt / Nhiệt luyện</option>
-                        <option value="NC">Tổ Tiện NC</option>
-                        <option value="MNC">Tổ Phay MNC</option>
-                        <option value="GS_GV">Tổ GS - GV</option>
-                        <option value="GP_GE_GI">Tổ GP - GE - GI</option>
-                        <option value="BARRY">Tổ Bavia (BARRY)</option>
-                        <option value="ASSY">Tổ Lắp Ráp / Gia Công Ngoài</option>
-                        <option value="KENSA">Tổ Kiểm Tra (Kensa)</option>
-                      </datalist>
-                    </div>
-                    <div style="display: flex; gap: 8px">
-                      <button
-                        type="submit"
-                        id="btn-save-stage"
-                        class="btn btn-primary"
-                        style="flex: 1"
-                      >
-                        + Lưu Công Đoạn
-                      </button>
-                      <button
-                        type="button"
-                        id="btn-cancel-stage-edit"
-                        class="btn btn-secondary hidden"
-                        onclick="resetStageForm()"
-                      >
-                        Hủy sửa
-                      </button>
-                    </div>
-                  </form>
-                </div>
-
-                <!-- BẢNG DANH SÁCH CÔNG ĐOẠN -->
-                <div style="flex: 2; min-width: 380px">
-                  <div
-                    id="stage-list-container"
-                    style="
-                      max-height: 320px;
-                      overflow-y: auto;
-                      border: 1px solid var(--border);
-                      border-radius: 8px;
-                    "
-                  >
-                    <p style="padding: 12px">Đang tải danh sách công đoạn...</p>
+              <!-- CỘT PHẢI: DANH SÁCH CÔNG ĐOẠN SẢN XUẤT -->
+              <div class="card form-card master-col-right">
+                <div class="card-header-flex">
+                  <div>
+                    <h3>
+                      Danh Sách Công Đoạn Sản Xuất (<span id="stage-count"
+                        >0</span
+                      >)
+                    </h3>
+                    <p style="font-size: 12px; color: var(--muted)">
+                      Thứ tự từ trên xuống dưới tương ứng với thứ tự cột trên
+                      Bảng Báo Cáo Tiến Độ.
+                    </p>
                   </div>
+                  <button
+                    type="button"
+                    class="btn btn-secondary btn-sm"
+                    onclick="loadNGDropdownsThorough()"
+                  >
+                    Làm mới
+                  </button>
+                </div>
+                <div
+                  id="stage-list-container"
+                  style="
+                    max-height: 540px;
+                    overflow-y: auto;
+                    border: 1px solid var(--border);
+                    border-radius: 8px;
+                  "
+                >
+                  <p style="padding: 12px">Đang tải danh sách công đoạn...</p>
                 </div>
               </div>
             </div>
           </div>
 
-          <!-- TAB 2: TẠO PO / LOT & DANH SÁCH LOT -->
+          <!-- TAB 3: TẠO PO / LOT & DANH SÁCH LOT -->
           <div id="tab-po" class="tab-content hidden">
             <div class="master-grid">
               <div class="card form-card" style="flex: 1; min-width: 340px">
@@ -347,7 +388,9 @@
                 </h2>
                 <form id="form-create-po">
                   <div class="input-group">
-                    <label for="po-prefix">Mã Lô Gốc / Số PO (VD: PO1610)</label>
+                    <label for="po-prefix"
+                      >Mã Lô Gốc / Số PO (VD: PO1610)</label
+                    >
                     <input
                       type="text"
                       id="po-prefix"
@@ -373,7 +416,7 @@
                   </div>
                   <div class="input-group" style="display: flex; gap: 10px">
                     <div style="flex: 1">
-                      <label for="po-total">Tổng Sản Lượng</label>
+                      <label for="po-total">Tổng SL</label>
                       <input
                         type="number"
                         id="po-total"
@@ -410,7 +453,7 @@
                 </form>
               </div>
 
-              <!-- DANH SÁCH LOT GẦN ĐÂY & QUẢN LÝ XÓA LOT NHẦM -->
+              <!-- DANH SÁCH LOT GẦN ĐÂY -->
               <div class="card form-card" style="flex: 1.4; min-width: 380px">
                 <div class="card-header-flex">
                   <h3>Danh Sách LOT Đang Chạy</h3>
@@ -426,7 +469,7 @@
                 <div
                   id="po-manage-container"
                   style="
-                    max-height: 420px;
+                    max-height: 460px;
                     overflow-y: auto;
                     border: 1px solid var(--border);
                     border-radius: 8px;
@@ -439,16 +482,22 @@
             </div>
           </div>
 
-          <!-- TAB 3: XỬ LÝ HÀNG LỖI (NG) -->
+          <!-- TAB 4: XỬ LÝ HÀNG LỖI (NG) -->
           <div id="tab-ng" class="tab-content hidden">
             <div class="master-grid">
               <div class="card form-card" style="flex: 1; min-width: 340px">
                 <h2 style="margin-bottom: 10px; color: var(--maroon)">
                   Xử Lý Hàng Lỗi (NG)
                 </h2>
-                <p style="margin-bottom: 16px; font-size: 12px; color: var(--muted)">
-                  Chọn LOT đang có hàng lỗi NG để quyết định Báo Hủy (SCRAP) hoặc
-                  Đưa Về Công Đoạn Cũ Làm Lại (REWORK).
+                <p
+                  style="
+                    margin-bottom: 16px;
+                    font-size: 12px;
+                    color: var(--muted);
+                  "
+                >
+                  Chọn LOT đang có hàng lỗi NG để quyết định Báo Hủy (SCRAP)
+                  hoặc Đưa Về Công Đoạn Cũ Làm Lại (REWORK).
                 </p>
                 <form id="form-resolve-ng">
                   <div class="input-group">
@@ -462,7 +511,9 @@
                     </select>
                   </div>
                   <div class="input-group">
-                    <label for="ng-current-stage">2. Công đoạn phát sinh NG</label>
+                    <label for="ng-current-stage"
+                      >2. Công đoạn phát sinh NG</label
+                    >
                     <select id="ng-current-stage" required>
                       <option value="">-- Chọn công đoạn --</option>
                     </select>
@@ -484,7 +535,9 @@
                       required
                       onchange="toggleReworkStage()"
                     >
-                      <option value="SCRAP">Báo Hủy (SCRAP - Trừ khỏi LOT)</option>
+                      <option value="SCRAP">
+                        Báo Hủy (SCRAP - Trừ khỏi LOT)
+                      </option>
                       <option value="REWORK">
                         Làm Lại (REWORK - Trả về công đoạn)
                       </option>
@@ -513,14 +566,23 @@
                   <button
                     type="button"
                     class="btn btn-secondary btn-sm"
-                    onclick="loadNGDropdownsThorough(); fetchMatrixReport();"
+                    onclick="
+                      loadNGDropdownsThorough();
+                      fetchMatrixReport();
+                    "
                   >
                     Làm mới
                   </button>
                 </div>
-                <p style="font-size: 12px; color: var(--muted); margin-bottom: 10px">
-                  Bấm vào dòng bất kỳ để điền nhanh thông tin sang biểu mẫu xử lý
-                  bên trái.
+                <p
+                  style="
+                    font-size: 12px;
+                    color: var(--muted);
+                    margin-bottom: 10px;
+                  "
+                >
+                  Bấm vào dòng bất kỳ để điền nhanh thông tin sang biểu mẫu xử
+                  lý bên trái.
                 </p>
                 <div
                   id="ng-summary-list-container"
@@ -537,14 +599,14 @@
             </div>
           </div>
 
-          <!-- TAB 4: BÁO CÁO TIẾN ĐỘ & MA TRẬN WIP / NG TỔNG -->
+          <!-- TAB 5: BÁO CÁO TIẾN ĐỘ & MA TRẬN WIP / NG TỔNG -->
           <div id="tab-matrix" class="tab-content active">
             <div class="card-header-flex" style="margin-bottom: 10px">
               <div>
                 <h2>Báo Cáo Tiến Độ Sản Xuất (WIP) &amp; Theo Dõi NG</h2>
                 <p>
-                  Tổng hợp số lượng OK / NG qua từng công đoạn, Tổng NG lũy kế và
-                  Tồn kho thành phẩm theo thời gian thực.
+                  Tổng hợp số lượng OK / NG qua từng công đoạn, Tổng NG lũy kế
+                  và Tồn kho thành phẩm theo thời gian thực.
                 </p>
               </div>
               <div style="display: flex; gap: 6px; flex-wrap: wrap">
@@ -579,7 +641,7 @@
               </div>
             </div>
 
-            <!-- BỘ LỌC BÁO CÁO ĐA CHIỀU (NGÀY THÁNG, MÃ HÀNG, SỐ LOT, TRẠNG THÁI) -->
+            <!-- BỘ LỌC BÁO CÁO ĐA CHIỀU -->
             <div class="card filter-panel">
               <div class="filter-row">
                 <div class="filter-item">
@@ -633,13 +695,16 @@
                   >
                     <option value="ALL">-- Tất cả trạng thái --</option>
                     <option value="WIP">Đang sản xuất (Còn WIP)</option>
-                    <option value="HAS_NG">Có phát sinh hàng NG (&gt; 0)</option>
+                    <option value="HAS_NG">
+                      Có phát sinh hàng NG (&gt; 0)
+                    </option>
                     <option value="DONE">Đã hoàn thành vào KHO</option>
                   </select>
                 </div>
               </div>
               <div class="filter-quick-bar">
-                <span style="font-size: 12px; color: var(--muted); font-weight: 600"
+                <span
+                  style="font-size: 12px; color: var(--muted); font-weight: 600"
                   >Chọn nhanh thời gian:</span
                 >
                 <button
@@ -696,14 +761,14 @@
             </div>
           </div>
 
-          <!-- TAB 5: LỊCH SỬ GIAO DỊCH SẢN XUẤT -->
+          <!-- TAB 6: LỊCH SỬ GIAO DỊCH SẢN XUẤT -->
           <div id="tab-history" class="tab-content hidden">
             <div class="card-header-flex" style="margin-bottom: 12px">
               <div>
                 <h2>Lịch Sử Giao Dịch Sản Xuất</h2>
                 <p>
                   Nhật ký chi tiết từng lần chuyển công đoạn (PASS / NG / REWORK
-                  / SCRAP) theo thời gian và người thao tác.
+                  / SCRAP).
                 </p>
               </div>
               <div style="display: flex; gap: 8px">
@@ -839,7 +904,10 @@
         <a
           href="#"
           class="logout-btn"
-          onclick="logout(); return false;"
+          onclick="
+            logout();
+            return false;
+          "
           style="color: var(--white); text-decoration: none; font-weight: bold"
           >Thoát</a
         >
@@ -1088,6 +1156,7 @@
       </main>
     </div>
 
+    <!-- <script src="mock.js"></script> -->
     <script src="script.js"></script>
   </body>
 </html>

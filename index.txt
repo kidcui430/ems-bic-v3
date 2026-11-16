@@ -1,0 +1,1093 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>APP EMS</title>
+    <link rel="stylesheet" href="style.css" />
+    <link rel="manifest" href="manifest.json" />
+    <meta name="theme-color" content="#193958" />
+    <link rel="apple-touch-icon" href="logo192.png" />
+  </head>
+  <body>
+    <!-- MÀN HÌNH ĐĂNG NHẬP -->
+    <div id="login-screen" class="screen active">
+      <div class="login-card">
+        <img
+          src="logo.png"
+          alt="Logo"
+          class="logo"
+          onerror="this.style.display = 'none'"
+        />
+        <h2>Đăng Nhập Hệ Thống</h2>
+        <form id="login-form">
+          <div class="input-group">
+            <label for="username">Tài khoản</label>
+            <input
+              type="text"
+              id="username"
+              required
+              placeholder="Mã NV..."
+              style="text-transform: uppercase"
+              autocomplete="username"
+            />
+          </div>
+          <div class="input-group">
+            <label for="password">Mật khẩu</label>
+            <input
+              type="password"
+              id="password"
+              required
+              placeholder="Nhập mật khẩu..."
+              autocomplete="current-password"
+            />
+          </div>
+          <button type="submit" class="btn btn-primary w-100">Đăng Nhập</button>
+          <p id="login-error" class="text-error hidden">
+            Sai tài khoản hoặc mật khẩu!
+          </p>
+        </form>
+
+        <!-- MODAL ĐỔI MẬT KHẨU LẦN ĐẦU -->
+        <div id="change-pass-modal" class="modal-backdrop hidden">
+          <div class="login-card modal-card">
+            <h3 style="color: var(--maroon); margin-bottom: 10px">
+              Yêu Cầu Đổi Mật Khẩu
+            </h3>
+            <p style="font-size: 13px; color: #555; margin-bottom: 15px">
+              Vui lòng đặt mật khẩu mới (tối thiểu 4 ký tự) để tiếp tục.
+            </p>
+            <input
+              type="password"
+              id="new-password"
+              placeholder="Mật khẩu mới..."
+              class="w-100"
+              style="margin-bottom: 12px"
+            />
+            <button
+              type="button"
+              onclick="submitNewPassword()"
+              class="btn btn-primary w-100"
+            >
+              Lưu &amp; Đăng nhập
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MÀN HÌNH ADMIN (Giao diện Desktop & Responsive) -->
+    <div id="admin-screen" class="screen hidden">
+      <header class="navbar">
+        <div class="nav-brand">Hệ Thống Quản Lý Sản Xuất (Admin)</div>
+        <div class="nav-user">
+          Xin chào, <strong id="admin-name">Admin</strong> |
+          <a href="#" onclick="logout(); return false;">Thoát</a>
+        </div>
+      </header>
+      <div class="app-body">
+        <aside class="sidebar">
+          <button
+            type="button"
+            class="tab-btn"
+            data-tab="tab-master"
+            onclick="switchTab('admin', 'tab-master', this)"
+          >
+            Mã Hàng &amp; Công Đoạn
+          </button>
+          <button
+            type="button"
+            class="tab-btn"
+            data-tab="tab-po"
+            onclick="switchTab('admin', 'tab-po', this)"
+          >
+            Quản Lý LOT
+          </button>
+          <button
+            type="button"
+            class="tab-btn"
+            data-tab="tab-ng"
+            onclick="switchTab('admin', 'tab-ng', this)"
+          >
+            Xử Lý Hàng NG
+          </button>
+          <button
+            type="button"
+            class="tab-btn active"
+            data-tab="tab-matrix"
+            onclick="switchTab('admin', 'tab-matrix', this)"
+          >
+            Báo Cáo &amp; Tiến Độ
+          </button>
+          <button
+            type="button"
+            class="tab-btn"
+            data-tab="tab-history"
+            onclick="switchTab('admin', 'tab-history', this)"
+          >
+            Lịch Sử SX
+          </button>
+        </aside>
+
+        <main class="content">
+          <!-- TAB 1: QUẢN LÝ MÃ HÀNG & CÔNG ĐOẠN SẢN XUẤT -->
+          <div id="tab-master" class="tab-content hidden">
+            <!-- PHẦN A: QUẢN LÝ MÃ HÀNG & LỘ TRÌNH -->
+            <div class="master-grid">
+              <!-- CỘT TRÁI: FORM TẠO / SỬA MÃ HÀNG -->
+              <div class="card form-card master-col-left">
+                <div class="card-header-flex">
+                  <h2 id="product-form-title">Tạo Mã Hàng &amp; Lộ Trình</h2>
+                  <span id="product-edit-badge" class="badge-edit hidden"
+                    >Đang sửa</span
+                  >
+                </div>
+                <form id="form-create-product">
+                  <input type="hidden" id="md-edit-mode" value="create" />
+                  <input type="hidden" id="md-original-code" value="" />
+                  <div class="input-group">
+                    <label for="md-product-code">Mã Sản Phẩm</label>
+                    <input
+                      type="text"
+                      id="md-product-code"
+                      required
+                      placeholder="VD: TB-30"
+                      style="text-transform: uppercase"
+                    />
+                  </div>
+                  <div class="input-group">
+                    <label for="md-product-name">Tên Sản Phẩm</label>
+                    <input
+                      type="text"
+                      id="md-product-name"
+                      required
+                      placeholder="VD: Bánh răng thép"
+                    />
+                  </div>
+                  <div class="input-group">
+                    <div
+                      style="
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        margin-bottom: 6px;
+                      "
+                    >
+                      <label style="margin-bottom: 0"
+                        >Lộ Trình Sản Xuất (Thứ tự các công đoạn)</label
+                      >
+                      <button
+                        type="button"
+                        class="btn btn-secondary btn-sm"
+                        onclick="addRoutingStep()"
+                      >
+                        + Thêm bước
+                      </button>
+                    </div>
+                    <div id="routing-builder" class="routing-box"></div>
+                  </div>
+                  <div style="display: flex; gap: 8px">
+                    <button
+                      type="submit"
+                      id="btn-save-product"
+                      class="btn btn-primary"
+                      style="flex: 1"
+                    >
+                      Lưu Mã Hàng
+                    </button>
+                    <button
+                      type="button"
+                      id="btn-cancel-product-edit"
+                      class="btn btn-secondary hidden"
+                      onclick="resetProductForm()"
+                    >
+                      Hủy sửa
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              <!-- CỘT PHẢI: DANH SÁCH MÃ HÀNG (CÓ SỬA / XÓA) -->
+              <div class="card form-card master-col-right">
+                <div class="card-header-flex">
+                  <h3>Danh Sách Mã Hàng (<span id="master-count">0</span>)</h3>
+                  <button
+                    type="button"
+                    class="btn btn-secondary btn-sm"
+                    onclick="fetchProductsList()"
+                  >
+                    Làm mới
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  id="search-master"
+                  class="search-input w-100"
+                  placeholder="🔍 Tìm theo Mã hàng, Tên hàng hoặc Công đoạn..."
+                  oninput="filterMasterData()"
+                  style="margin-bottom: 12px"
+                />
+                <div
+                  id="master-list-container"
+                  style="max-height: 430px; overflow-y: auto"
+                >
+                  <p style="padding: 12px">Đang tải dữ liệu...</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- PHẦN B: QUẢN LÝ DANH MỤC CÔNG ĐOẠN SẢN XUẤT (THÊM / SỬA / XÓA / SẮP XẾP) -->
+            <div class="card form-card" style="margin-top: 8px">
+              <div class="card-header-flex">
+                <div>
+                  <h2>Quản Lý Công Đoạn Sản Xuất</h2>
+                  <p style="font-size: 12px; color: var(--muted)">
+                    Thêm mới, đổi tên, gán Line phụ trách, sắp xếp thứ tự hiển
+                    thị trên bảng Báo Cáo hoặc xóa công đoạn không còn sử dụng.
+                  </p>
+                </div>
+                <span id="stage-edit-badge" class="badge-edit hidden"
+                  >Đang sửa công đoạn</span
+                >
+              </div>
+
+              <div class="master-grid" style="margin-top: 14px">
+                <!-- FORM THÊM / SỬA CÔNG ĐOẠN -->
+                <div style="flex: 1; min-width: 280px">
+                  <form id="form-stage-manager">
+                    <input type="hidden" id="stg-edit-mode" value="create" />
+                    <input type="hidden" id="stg-original-id" value="" />
+                    <div class="input-group">
+                      <label for="stg-id"
+                        >Mã Công Đoạn (ID viết liền, không dấu)</label
+                      >
+                      <input
+                        type="text"
+                        id="stg-id"
+                        required
+                        placeholder="VD: CAT, NC1, BARRY..."
+                        style="text-transform: uppercase"
+                      />
+                    </div>
+                    <div class="input-group">
+                      <label for="stg-name">Tên Hiển Thị Công Đoạn</label>
+                      <input
+                        type="text"
+                        id="stg-name"
+                        required
+                        placeholder="VD: Cắt, Tiện NC1, Bavia..."
+                      />
+                    </div>
+                    <div class="input-group">
+                      <label for="stg-line">Mã Line Quản Lý (Cho Leader)</label>
+                      <input
+                        type="text"
+                        id="stg-line"
+                        required
+                        list="line-suggestions"
+                        placeholder="VD: CUTTING, NC, MNC, GS_GV, GP_GE_GI, ASSY, KENSA..."
+                        style="text-transform: uppercase"
+                      />
+                      <datalist id="line-suggestions">
+                        <option value="CUTTING">Tổ Cắt / Nhiệt luyện</option>
+                        <option value="NC">Tổ Tiện NC</option>
+                        <option value="MNC">Tổ Phay MNC</option>
+                        <option value="GS_GV">Tổ GS - GV</option>
+                        <option value="GP_GE_GI">Tổ GP - GE - GI</option>
+                        <option value="BARRY">Tổ Bavia (BARRY)</option>
+                        <option value="ASSY">Tổ Lắp Ráp / Gia Công Ngoài</option>
+                        <option value="KENSA">Tổ Kiểm Tra (Kensa)</option>
+                      </datalist>
+                    </div>
+                    <div style="display: flex; gap: 8px">
+                      <button
+                        type="submit"
+                        id="btn-save-stage"
+                        class="btn btn-primary"
+                        style="flex: 1"
+                      >
+                        + Lưu Công Đoạn
+                      </button>
+                      <button
+                        type="button"
+                        id="btn-cancel-stage-edit"
+                        class="btn btn-secondary hidden"
+                        onclick="resetStageForm()"
+                      >
+                        Hủy sửa
+                      </button>
+                    </div>
+                  </form>
+                </div>
+
+                <!-- BẢNG DANH SÁCH CÔNG ĐOẠN -->
+                <div style="flex: 2; min-width: 380px">
+                  <div
+                    id="stage-list-container"
+                    style="
+                      max-height: 320px;
+                      overflow-y: auto;
+                      border: 1px solid var(--border);
+                      border-radius: 8px;
+                    "
+                  >
+                    <p style="padding: 12px">Đang tải danh sách công đoạn...</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- TAB 2: TẠO PO / LOT & DANH SÁCH LOT -->
+          <div id="tab-po" class="tab-content hidden">
+            <div class="master-grid">
+              <div class="card form-card" style="flex: 1; min-width: 340px">
+                <h2 style="margin-bottom: 16px; color: var(--navy)">
+                  Tạo LOT &amp; Cấp Phát Sản Xuất
+                </h2>
+                <form id="form-create-po">
+                  <div class="input-group">
+                    <label for="po-prefix">Mã Lô Gốc / Số PO (VD: PO1610)</label>
+                    <input
+                      type="text"
+                      id="po-prefix"
+                      required
+                      placeholder="VD: PO1610"
+                      style="text-transform: uppercase"
+                      oninput="previewLotSplit()"
+                    />
+                  </div>
+                  <div class="input-group">
+                    <label for="product-code">Mã Hàng (Gõ để tìm kiếm)</label>
+                    <input
+                      type="text"
+                      id="product-code"
+                      required
+                      placeholder="Gõ mã hàng..."
+                      style="text-transform: uppercase"
+                      list="product-suggestions"
+                      autocomplete="off"
+                      oninput="previewLotSplit()"
+                    />
+                    <datalist id="product-suggestions"></datalist>
+                  </div>
+                  <div class="input-group" style="display: flex; gap: 10px">
+                    <div style="flex: 1">
+                      <label for="po-total">Tổng Sản Lượng</label>
+                      <input
+                        type="number"
+                        id="po-total"
+                        required
+                        min="1"
+                        placeholder="VD: 500"
+                        oninput="previewLotSplit()"
+                      />
+                    </div>
+                    <div style="flex: 1">
+                      <label for="po-split">Định Mức 1 LOT (SL chia)</label>
+                      <input
+                        type="number"
+                        id="po-split"
+                        required
+                        min="1"
+                        placeholder="VD: 100"
+                        oninput="previewLotSplit()"
+                      />
+                    </div>
+                  </div>
+                  <div class="input-group">
+                    <label for="po-date">Ngày Cấp Phát</label>
+                    <input type="date" id="po-date" required />
+                  </div>
+                  <div
+                    id="po-split-preview"
+                    class="preview-box hidden"
+                    style="margin-bottom: 14px"
+                  ></div>
+                  <button type="submit" class="btn btn-primary w-100">
+                    Chẻ LOT &amp; Cấp Phát Sản Xuất
+                  </button>
+                </form>
+              </div>
+
+              <!-- DANH SÁCH LOT GẦN ĐÂY & QUẢN LÝ XÓA LOT NHẦM -->
+              <div class="card form-card" style="flex: 1.4; min-width: 380px">
+                <div class="card-header-flex">
+                  <h3>Danh Sách LOT Đang Chạy</h3>
+                  <input
+                    type="text"
+                    id="search-po-manage"
+                    class="search-input"
+                    placeholder="🔍 Tìm Số LOT / Mã hàng..."
+                    style="max-width: 220px"
+                    oninput="renderPOManageTable()"
+                  />
+                </div>
+                <div
+                  id="po-manage-container"
+                  style="
+                    max-height: 420px;
+                    overflow-y: auto;
+                    border: 1px solid var(--border);
+                    border-radius: 8px;
+                    margin-top: 10px;
+                  "
+                >
+                  <p style="padding: 12px">Đang tải dữ liệu LOT...</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- TAB 3: XỬ LÝ HÀNG LỖI (NG) -->
+          <div id="tab-ng" class="tab-content hidden">
+            <div class="master-grid">
+              <div class="card form-card" style="flex: 1; min-width: 340px">
+                <h2 style="margin-bottom: 10px; color: var(--maroon)">
+                  Xử Lý Hàng Lỗi (NG)
+                </h2>
+                <p style="margin-bottom: 16px; font-size: 12px; color: var(--muted)">
+                  Chọn LOT đang có hàng lỗi NG để quyết định Báo Hủy (SCRAP) hoặc
+                  Đưa Về Công Đoạn Cũ Làm Lại (REWORK).
+                </p>
+                <form id="form-resolve-ng">
+                  <div class="input-group">
+                    <label for="ng-po-select">1. Chọn LOT có hàng NG</label>
+                    <select
+                      id="ng-po-select"
+                      required
+                      onchange="onSelectNGLot()"
+                    >
+                      <option value="">-- Vui lòng chờ tải dữ liệu --</option>
+                    </select>
+                  </div>
+                  <div class="input-group">
+                    <label for="ng-current-stage">2. Công đoạn phát sinh NG</label>
+                    <select id="ng-current-stage" required>
+                      <option value="">-- Chọn công đoạn --</option>
+                    </select>
+                  </div>
+                  <div class="input-group">
+                    <label for="ng-qty">3. Số lượng NG xử lý</label>
+                    <input
+                      type="number"
+                      id="ng-qty"
+                      required
+                      min="1"
+                      placeholder="Nhập số lượng NG..."
+                    />
+                  </div>
+                  <div class="input-group">
+                    <label for="ng-action">4. Phương án xử lý</label>
+                    <select
+                      id="ng-action"
+                      required
+                      onchange="toggleReworkStage()"
+                    >
+                      <option value="SCRAP">Báo Hủy (SCRAP - Trừ khỏi LOT)</option>
+                      <option value="REWORK">
+                        Làm Lại (REWORK - Trả về công đoạn)
+                      </option>
+                    </select>
+                  </div>
+                  <div class="input-group hidden" id="group-return-stage">
+                    <label for="ng-return-stage"
+                      >5. Trả về công đoạn nào để làm lại?</label
+                    >
+                    <select id="ng-return-stage">
+                      <option value="">-- Chọn công đoạn trả về --</option>
+                    </select>
+                  </div>
+                  <button type="submit" class="btn btn-danger w-100">
+                    Xác Nhận Xử Lý NG
+                  </button>
+                </form>
+              </div>
+
+              <!-- BẢNG TỔNG HỢP CÁC LOT ĐANG CÓ NG -->
+              <div class="card form-card" style="flex: 1.4; min-width: 380px">
+                <div class="card-header-flex">
+                  <h3 style="color: var(--maroon)">
+                    Danh Sách LOT Đang Có Hàng NG
+                  </h3>
+                  <button
+                    type="button"
+                    class="btn btn-secondary btn-sm"
+                    onclick="loadNGDropdownsThorough(); fetchMatrixReport();"
+                  >
+                    Làm mới
+                  </button>
+                </div>
+                <p style="font-size: 12px; color: var(--muted); margin-bottom: 10px">
+                  Bấm vào dòng bất kỳ để điền nhanh thông tin sang biểu mẫu xử lý
+                  bên trái.
+                </p>
+                <div
+                  id="ng-summary-list-container"
+                  style="
+                    max-height: 400px;
+                    overflow-y: auto;
+                    border: 1px solid var(--border);
+                    border-radius: 8px;
+                  "
+                >
+                  <p style="padding: 12px">Đang kiểm tra dữ liệu NG...</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- TAB 4: BÁO CÁO TIẾN ĐỘ & MA TRẬN WIP / NG TỔNG -->
+          <div id="tab-matrix" class="tab-content active">
+            <div class="card-header-flex" style="margin-bottom: 10px">
+              <div>
+                <h2>Báo Cáo Tiến Độ Sản Xuất (WIP) &amp; Theo Dõi NG</h2>
+                <p>
+                  Tổng hợp số lượng OK / NG qua từng công đoạn, Tổng NG lũy kế và
+                  Tồn kho thành phẩm theo thời gian thực.
+                </p>
+              </div>
+              <div style="display: flex; gap: 6px; flex-wrap: wrap">
+                <button
+                  type="button"
+                  class="btn btn-primary"
+                  onclick="fetchMatrixReport()"
+                >
+                  🔄 Làm mới
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-success"
+                  onclick="exportMatrixExcel()"
+                >
+                  📊 Xuất Excel (.xls)
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-secondary"
+                  onclick="exportMatrixCSV()"
+                >
+                  📄 Xuất CSV
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-secondary"
+                  onclick="window.print()"
+                >
+                  🖨️ In Báo Cáo
+                </button>
+              </div>
+            </div>
+
+            <!-- BỘ LỌC BÁO CÁO ĐA CHIỀU (NGÀY THÁNG, MÃ HÀNG, SỐ LOT, TRẠNG THÁI) -->
+            <div class="card filter-panel">
+              <div class="filter-row">
+                <div class="filter-item">
+                  <label for="search-date-from">Từ ngày cấp phát</label>
+                  <input
+                    type="date"
+                    id="search-date-from"
+                    class="search-input"
+                    onchange="filterMatrix()"
+                  />
+                </div>
+                <div class="filter-item">
+                  <label for="search-date-to">Đến ngày cấp phát</label>
+                  <input
+                    type="date"
+                    id="search-date-to"
+                    class="search-input"
+                    onchange="filterMatrix()"
+                  />
+                </div>
+                <div class="filter-item">
+                  <label for="search-code">Mã Hàng</label>
+                  <input
+                    type="text"
+                    id="search-code"
+                    list="matrix-product-suggest"
+                    class="search-input"
+                    placeholder="🔍 Tất cả mã hàng..."
+                    oninput="filterMatrix()"
+                    style="text-transform: uppercase"
+                  />
+                  <datalist id="matrix-product-suggest"></datalist>
+                </div>
+                <div class="filter-item">
+                  <label for="search-lot">Số LOT / PO</label>
+                  <input
+                    type="text"
+                    id="search-lot"
+                    class="search-input"
+                    placeholder="🔍 Tìm Số LOT..."
+                    oninput="filterMatrix()"
+                    style="text-transform: uppercase"
+                  />
+                </div>
+                <div class="filter-item">
+                  <label for="search-status">Trạng thái LOT</label>
+                  <select
+                    id="search-status"
+                    class="search-input"
+                    onchange="filterMatrix()"
+                  >
+                    <option value="ALL">-- Tất cả trạng thái --</option>
+                    <option value="WIP">Đang sản xuất (Còn WIP)</option>
+                    <option value="HAS_NG">Có phát sinh hàng NG (&gt; 0)</option>
+                    <option value="DONE">Đã hoàn thành vào KHO</option>
+                  </select>
+                </div>
+              </div>
+              <div class="filter-quick-bar">
+                <span style="font-size: 12px; color: var(--muted); font-weight: 600"
+                  >Chọn nhanh thời gian:</span
+                >
+                <button
+                  type="button"
+                  class="btn-chip"
+                  onclick="setQuickDateFilter('TODAY')"
+                >
+                  Hôm nay
+                </button>
+                <button
+                  type="button"
+                  class="btn-chip"
+                  onclick="setQuickDateFilter('7DAYS')"
+                >
+                  7 ngày qua
+                </button>
+                <button
+                  type="button"
+                  class="btn-chip"
+                  onclick="setQuickDateFilter('MONTH')"
+                >
+                  Tháng này
+                </button>
+                <button
+                  type="button"
+                  class="btn-chip"
+                  onclick="setQuickDateFilter('ALL')"
+                >
+                  Tất cả thời gian
+                </button>
+                <button
+                  type="button"
+                  class="btn-chip btn-chip-clear"
+                  onclick="clearMatrixFilters()"
+                >
+                  ✖ Xóa toàn bộ lọc
+                </button>
+              </div>
+            </div>
+
+            <!-- THẺ TỔNG HỢP KPI THEO BỘ LỌC HIỆN TẠI -->
+            <div id="matrix-kpi-bar" class="kpi-grid"></div>
+
+            <!-- THỐNG KÊ NHANH NG THEO TỪNG CÔNG ĐOẠN -->
+            <div
+              id="stage-ng-breakdown"
+              class="stage-ng-bar hidden"
+              style="margin-bottom: 12px"
+            ></div>
+
+            <!-- CONTAINER CHỨA BẢNG DATA -->
+            <div id="matrix-table-container" style="overflow-x: auto">
+              <p style="padding: 16px">Đang tải dữ liệu...</p>
+            </div>
+          </div>
+
+          <!-- TAB 5: LỊCH SỬ GIAO DỊCH SẢN XUẤT -->
+          <div id="tab-history" class="tab-content hidden">
+            <div class="card-header-flex" style="margin-bottom: 12px">
+              <div>
+                <h2>Lịch Sử Giao Dịch Sản Xuất</h2>
+                <p>
+                  Nhật ký chi tiết từng lần chuyển công đoạn (PASS / NG / REWORK
+                  / SCRAP) theo thời gian và người thao tác.
+                </p>
+              </div>
+              <div style="display: flex; gap: 8px">
+                <button
+                  type="button"
+                  class="btn btn-primary"
+                  onclick="fetchHistoryLog()"
+                >
+                  🔄 Làm mới
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-success"
+                  onclick="exportHistoryExcel()"
+                >
+                  📊 Xuất Excel Lịch Sử
+                </button>
+              </div>
+            </div>
+
+            <div class="card filter-panel">
+              <div class="filter-row">
+                <div class="filter-item">
+                  <label for="hist-date-from">Từ ngày</label>
+                  <input
+                    type="date"
+                    id="hist-date-from"
+                    class="search-input"
+                    onchange="filterHistoryLog('admin')"
+                  />
+                </div>
+                <div class="filter-item">
+                  <label for="hist-date-to">Đến ngày</label>
+                  <input
+                    type="date"
+                    id="hist-date-to"
+                    class="search-input"
+                    onchange="filterHistoryLog('admin')"
+                  />
+                </div>
+                <div class="filter-item">
+                  <label for="hist-stage">Công đoạn</label>
+                  <select
+                    id="hist-stage"
+                    class="search-input"
+                    onchange="filterHistoryLog('admin')"
+                  >
+                    <option value="">-- Mọi công đoạn --</option>
+                  </select>
+                </div>
+                <div class="filter-item">
+                  <label for="hist-type">Loại giao dịch</label>
+                  <select
+                    id="hist-type"
+                    class="search-input"
+                    onchange="filterHistoryLog('admin')"
+                  >
+                    <option value="">-- Tất cả (PASS &amp; NG) --</option>
+                    <option value="PASS">Hàng Đạt (PASS)</option>
+                    <option value="NG">Hàng Lỗi (NG / SCRAP / REWORK)</option>
+                  </select>
+                </div>
+                <div class="filter-item">
+                  <label for="hist-keyword">Mã Hàng / Số LOT</label>
+                  <input
+                    type="text"
+                    id="hist-keyword"
+                    list="hist-suggest"
+                    class="search-input"
+                    placeholder="🔍 Gõ Mã Hàng / Số LOT..."
+                    oninput="filterHistoryLog('admin')"
+                    autocomplete="off"
+                    style="text-transform: uppercase"
+                  />
+                  <datalist id="hist-suggest"></datalist>
+                </div>
+              </div>
+            </div>
+
+            <div
+              id="history-summary-admin"
+              style="
+                margin-bottom: 10px;
+                font-size: 13px;
+                font-weight: 600;
+                color: var(--navy);
+              "
+            ></div>
+
+            <div
+              class="card"
+              style="overflow-x: auto; max-height: 520px; padding: 0"
+            >
+              <table class="matrix-table" id="history-export-table">
+                <thead>
+                  <tr>
+                    <th>Thời Gian</th>
+                    <th>Người Thao Tác</th>
+                    <th>Mã Hàng</th>
+                    <th>Số PO/LOT</th>
+                    <th>Loại</th>
+                    <th>SL</th>
+                    <th>Từ Trạm</th>
+                    <th>Đến Trạm</th>
+                  </tr>
+                </thead>
+                <tbody id="history-tbody">
+                  <tr>
+                    <td colspan="8" style="text-align: center; padding: 20px">
+                      Đang tải dữ liệu...
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <!-- MÀN HÌNH LEADER (Giao diện Mobile-First) -->
+    <div id="leader-screen" class="screen hidden">
+      <header class="navbar mobile-nav">
+        <div class="nav-brand">
+          Xin chào,
+          <span id="leader-name" style="color: var(--lime); font-weight: bold"
+            >Leader</span
+          >
+          <div style="font-size: 12px; font-weight: normal; margin-top: 2px">
+            Line quản lý: <strong id="leader-line">...</strong>
+          </div>
+        </div>
+        <a
+          href="#"
+          class="logout-btn"
+          onclick="logout(); return false;"
+          style="color: var(--white); text-decoration: none; font-weight: bold"
+          >Thoát</a
+        >
+      </header>
+
+      <div class="tabs-mobile">
+        <button
+          type="button"
+          class="tab-btn-mobile active"
+          data-tab="tab-wip"
+          onclick="switchTab('leader', 'tab-wip', this)"
+        >
+          Số lượng tồn (<span id="leader-wip-count">0</span>)
+        </button>
+        <button
+          type="button"
+          class="tab-btn-mobile"
+          data-tab="tab-action"
+          onclick="switchTab('leader', 'tab-action', this)"
+        >
+          Thao Tác Giao
+        </button>
+        <button
+          type="button"
+          class="tab-btn-mobile"
+          data-tab="tab-history-leader"
+          onclick="switchTab('leader', 'tab-history-leader', this)"
+        >
+          Lịch Sử Giao
+        </button>
+      </div>
+
+      <main
+        class="content-mobile"
+        style="display: flex; flex-direction: column"
+      >
+        <!-- 1. TAB WIP (SỐ LƯỢNG TỒN) -->
+        <div id="tab-wip" class="tab-content active" style="order: 2"></div>
+
+        <!-- 2. THANH TÌM KIẾM LEADER -->
+        <div
+          id="leader-search-group"
+          style="
+            order: 1;
+            display: flex;
+            gap: 8px;
+            margin-bottom: 14px;
+            width: 100%;
+          "
+        >
+          <div style="flex: 1; min-width: 0">
+            <input
+              type="text"
+              id="search-leader-product"
+              list="leader-product-list"
+              oninput="updateLeaderLotOptions()"
+              placeholder="🔍 MÃ HÀNG..."
+              class="search-input"
+              style="
+                font-weight: 600;
+                color: var(--navy);
+                text-transform: uppercase;
+              "
+              autocomplete="off"
+            />
+            <datalist id="leader-product-list"></datalist>
+          </div>
+          <div style="flex: 1; min-width: 0">
+            <input
+              type="text"
+              id="search-leader-lot"
+              list="leader-lot-list"
+              oninput="filterLeaderPOs()"
+              placeholder="🔍 SỐ LOT..."
+              class="search-input"
+              style="
+                font-weight: 600;
+                color: var(--navy);
+                text-transform: uppercase;
+              "
+              autocomplete="off"
+            />
+            <datalist id="leader-lot-list"></datalist>
+          </div>
+        </div>
+
+        <style>
+          #tab-wip.hidden + #leader-search-group {
+            display: none !important;
+          }
+        </style>
+
+        <!-- 3. TAB THAO TÁC (Giao nhận) -->
+        <div id="tab-action" class="tab-content hidden" style="order: 3">
+          <div class="card form-card">
+            <h3 style="color: var(--navy); margin-bottom: 14px">
+              Xác Nhận Giao Hàng Qua Trạm
+            </h3>
+            <div class="input-group">
+              <label for="action-date">Ngày thực hiện</label>
+              <input type="date" id="action-date" required />
+            </div>
+            <div class="input-group">
+              <label for="po-select">Chọn LOT đang chờ tại trạm</label>
+              <select id="po-select" onchange="onLeaderSelectPO()">
+                <option value="">-- Đang tải dữ liệu --</option>
+              </select>
+            </div>
+            <div
+              id="leader-selected-info"
+              class="preview-box hidden"
+              style="margin-bottom: 14px"
+            ></div>
+            <div class="input-group">
+              <div
+                style="
+                  display: flex;
+                  justify-content: space-between;
+                  align-items: center;
+                "
+              >
+                <label for="qty-pass">Số lượng đạt (PASS)</label>
+                <button
+                  type="button"
+                  class="btn-chip"
+                  onclick="fillMaxPassQty()"
+                  style="margin-bottom: 4px"
+                >
+                  Điền tối đa tồn
+                </button>
+              </div>
+              <input type="number" id="qty-pass" value="0" min="0" />
+            </div>
+            <div class="input-group">
+              <label for="qty-ng" class="text-error"
+                >Số lượng lỗi phát sinh (NG)</label
+              >
+              <input type="number" id="qty-ng" value="0" min="0" />
+            </div>
+            <button
+              type="button"
+              class="btn btn-primary w-100"
+              onclick="submitMove(false)"
+            >
+              Xác Nhận Chuyển Công Đoạn
+            </button>
+            <button
+              type="button"
+              id="btn-outsource"
+              class="btn btn-secondary w-100 hidden"
+              style="margin-top: 10px"
+              onclick="submitMove(true)"
+            >
+              Xuất Gia Công Ngoài
+            </button>
+          </div>
+        </div>
+
+        <!-- 4. TAB LỊCH SỬ LEADER -->
+        <div
+          id="tab-history-leader"
+          class="tab-content hidden"
+          style="order: 4"
+        >
+          <h3 style="color: var(--navy); margin-bottom: 12px">
+            Lịch Sử Giao Nhận Của Trạm
+          </h3>
+
+          <div
+            style="
+              display: flex;
+              gap: 8px;
+              flex-wrap: wrap;
+              margin-bottom: 10px;
+            "
+          >
+            <input
+              type="date"
+              id="hist-date-from-ld"
+              class="search-input"
+              title="Từ ngày"
+              style="flex: 1"
+              onchange="filterHistoryLog('leader')"
+            />
+            <input
+              type="date"
+              id="hist-date-to-ld"
+              class="search-input"
+              title="Đến ngày"
+              style="flex: 1"
+              onchange="filterHistoryLog('leader')"
+            />
+          </div>
+
+          <div style="display: flex; gap: 8px; margin-bottom: 12px">
+            <select
+              id="hist-stage-ld"
+              class="search-input"
+              style="flex: 1"
+              onchange="filterHistoryLog('leader')"
+            >
+              <option value="">-- Mọi trạm --</option>
+            </select>
+            <div style="flex: 1.5; min-width: 0">
+              <input
+                type="text"
+                id="hist-keyword-ld"
+                list="hist-suggest-ld"
+                class="search-input"
+                placeholder="🔍 Gõ Mã / LOT..."
+                oninput="filterHistoryLog('leader')"
+                autocomplete="off"
+                style="text-transform: uppercase"
+              />
+              <datalist id="hist-suggest-ld"></datalist>
+            </div>
+          </div>
+
+          <div
+            class="card"
+            style="overflow-x: auto; max-height: 480px; padding: 0"
+          >
+            <table class="matrix-table" style="min-width: 580px">
+              <thead>
+                <tr>
+                  <th>Thời Gian</th>
+                  <th>Người Thao Tác</th>
+                  <th>Mã Hàng</th>
+                  <th>Số LOT</th>
+                  <th>Loại</th>
+                  <th>SL</th>
+                  <th>Từ</th>
+                  <th>Đến</th>
+                </tr>
+              </thead>
+              <tbody id="history-tbody-leader">
+                <tr>
+                  <td colspan="8" style="text-align: center; padding: 16px">
+                    Đang tải...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <script src="script.js"></script>
+  </body>
+</html>
