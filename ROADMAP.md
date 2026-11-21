@@ -111,6 +111,12 @@ Tách từng module một. Sau mỗi lần tách, mở app kiểm các tab liên
 
 ---
 
+## Giai đoạn 6: ERP (máy móc, kho NVL, BOM, kế hoạch sản xuất)
+
+Toàn bộ thiết kế và checklist E0–E7 ở `docs/ERP_PLAN.md`. Không chép lại ở đây.
+
+---
+
 ## Gợi ý nhịp làm
 - Mỗi lần làm 1 đến 3 mục, rồi kiểm và commit.
 - Giai đoạn 1 nên làm trước mọi thứ khác vì app đang mở toàn bộ API cho người ngoài.

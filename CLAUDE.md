@@ -34,4 +34,9 @@ App theo dõi WIP theo lot/công đoạn cho nhà máy. UI tiếng Việt.
 - Test logic thuần: `node --test` (sau khi có test).
 
 ## Lộ trình
-Xem ROADMAP.md: dọn repo → bảo mật → toàn vẹn dữ liệu → tách module → UI/UX → tính năng mới.
+Xem ROADMAP.md: dọn repo → bảo mật → toàn vẹn dữ liệu → (bỏ qua tách module) → UI/UX → tính năng mới → ERP.
+
+## ERP (máy móc, kho NVL, BOM, kế hoạch)
+Thiết kế, schema, API và checklist nằm ở `docs/ERP_PLAN.md`.
+Phiên mới làm ERP: đọc docs/ERP_PLAN.md trước, làm giai đoạn đầu tiên chưa xong (mục 7),
+cập nhật checklist và nhật ký (mục 9) trong file đó khi xong. Không đọc lại cả script.js/worker.js, chỉ grep phần cần.

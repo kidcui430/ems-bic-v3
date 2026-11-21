@@ -264,6 +264,45 @@ async function validateRoutingForSave(env, routingStr) {
   return null;
 }
 
+// Các LOT đã cấp với mã PO này (PO1610 hoặc PO1610-xx), dùng để chống cấp trùng mã PO
+async function findLotsByPrefix(env, prefix) {
+  const like = prefix.replace(/[%_\\]/g, (c) => "\\" + c) + "-%";
+  const { results } = await env.DB.prepare(
+    `SELECT po.po_number, COALESCE(p.product_code, po.product_id) AS product_code
+     FROM Production_Orders po
+     LEFT JOIN Products p ON CAST(p.id AS TEXT) = CAST(po.product_id AS TEXT)
+     WHERE UPPER(po.po_number) = ? OR UPPER(po.po_number) LIKE ? ESCAPE '\\'
+     UNION
+     SELECT DISTINCT i.lot_number, COALESCE(p.product_code, i.product_id)
+     FROM Inventory i
+     LEFT JOIN Products p ON CAST(p.id AS TEXT) = CAST(i.product_id AS TEXT)
+     WHERE UPPER(i.lot_number) = ? OR UPPER(i.lot_number) LIKE ? ESCAPE '\\'`,
+  )
+    .bind(prefix, like, prefix, like)
+    .all();
+  return results || [];
+}
+
+// LOT "chưa đụng tới": toàn bộ hàng còn nguyên ở 1 công đoạn (công đoạn đầu), đúng bằng Tổng SL,
+// và chưa có giao dịch chuyển/NG nào (bỏ qua giao dịch ADJUST do sửa LOT).
+async function getLotUntouchedState(env, order) {
+  const lot = String(order.po_number).toUpperCase();
+  const { results: inv } = await env.DB.prepare(
+    `SELECT stage_id, quantity FROM Inventory WHERE UPPER(lot_number) = ? AND quantity > 0`,
+  ).bind(lot).all();
+  const moved = await env.DB.prepare(
+    `SELECT COUNT(*) AS cnt FROM Transactions_Log
+     WHERE UPPER(po_id) = ? AND COALESCE(type, '') NOT IN ('ADJUST')`,
+  ).bind(lot).first();
+  const rows = inv || [];
+  const untouched =
+    rows.length === 1 &&
+    Number(rows[0].quantity) === Number(order.total_qty) &&
+    !String(rows[0].stage_id).toUpperCase().endsWith("_NG") &&
+    Number(moved?.cnt || 0) === 0;
+  return { untouched, stage: rows[0]?.stage_id || "" };
+}
+
 // Điều kiện "tồn tại trạm nguồn còn đủ số lượng", dùng chung cho các câu lệnh trong 1 batch
 const STOCK_OK_SQL = `(SELECT COALESCE(SUM(quantity), 0) FROM Inventory
   WHERE lot_number = ? AND TRIM(UPPER(stage_id)) = ?) >= ?`;
@@ -288,7 +327,7 @@ async function getOrInitStages(env) {
       await env.DB.batch(insertStmts);
     }
 
-    // Đảm bảo bảng Lines và bảng Stages gốc trong D1 có đủ Line BARRY và các công đoạn mới
+    // Đảm bảo bảng Lines và bảng Stages gốc trong D1 có đủ Line BARRY và các công đoạn mới.
     try {
       await env.DB.batch([
         env.DB.prepare(
@@ -776,6 +815,20 @@ export default {
           );
         }
 
+        // Chống trùng mã PO: lot đầu tiên của 1 lần cấp phát phải dùng mã PO chưa từng cấp
+        const prefix = String(body.prefix || "").trim().toUpperCase();
+        if (prefix && body.batch_first) {
+          const used = await findLotsByPrefix(env, prefix);
+          if (used.length > 0) {
+            return jsonResponse(
+              {
+                error: `Mã PO "${prefix}" đã được cấp phát (${used.length} LOT, mã hàng ${[...new Set(used.map((u) => u.product_code))].join(", ")}). Mỗi mã PO chỉ dùng 1 lần!`,
+              },
+              400,
+            );
+          }
+        }
+
         const route = parseRouting(product.routing_map);
         if (!route) {
           return jsonResponse(
@@ -797,6 +850,81 @@ export default {
           ).bind(pId, poNumber, first_stage, totalQty),
         ]);
 
+        return jsonResponse({ success: true });
+      }
+
+      // Kiểm tra mã PO đã cấp phát chưa (trước khi chẻ LOT)
+      if (path === "/api/po/check" && method === "GET") {
+        const prefix = (url.searchParams.get("prefix") || "").trim().toUpperCase();
+        if (!prefix) return jsonResponse({ lots: [] });
+        return jsonResponse({ lots: await findLotsByPrefix(env, prefix) });
+      }
+
+      // Sửa LOT: đổi ngày cấp luôn được; đổi Tổng SL chỉ khi LOT chưa chuyển công đoạn
+      if (path.startsWith("/api/po/") && method === "PUT") {
+        const lot = decodeURIComponent(path.replace("/api/po/", "")).trim().toUpperCase();
+        const body = await request.json();
+        const order = await env.DB.prepare(
+          `SELECT * FROM Production_Orders WHERE UPPER(po_number) = ?`,
+        ).bind(lot).first();
+        if (!order) return jsonResponse({ error: `Không tìm thấy LOT ${lot}!` }, 404);
+
+        const newDate = String(body.production_date || order.month || "").trim();
+        const newQty = parseInt(body.total_qty);
+        const stmts = [
+          env.DB.prepare(`UPDATE Production_Orders SET month = ? WHERE id = ?`).bind(newDate, order.id),
+        ];
+
+        if (Number.isInteger(newQty) && newQty !== Number(order.total_qty)) {
+          if (newQty <= 0) return jsonResponse({ error: "Tổng SL phải lớn hơn 0!" }, 400);
+          const state = await getLotUntouchedState(env, order);
+          if (!state.untouched) {
+            return jsonResponse({ error: `LOT ${lot} đã chuyển công đoạn, không thể đổi Tổng SL. Chỉ sửa được ngày cấp.` }, 400);
+          }
+          const oldQty = Number(order.total_qty);
+          // Mỗi câu tự kiểm tồn còn đúng như lúc đọc, tránh lệch giữa PO và Inventory
+          const INV_OLD_OK = `EXISTS (SELECT 1 FROM Inventory WHERE UPPER(lot_number) = ? AND stage_id = ? AND quantity = ?)`;
+          stmts.push(
+            env.DB.prepare(
+              `UPDATE Production_Orders SET total_qty = ? WHERE id = ? AND ${INV_OLD_OK}`,
+            ).bind(newQty, order.id, lot, state.stage, oldQty),
+            env.DB.prepare(
+              `INSERT INTO Transactions_Log (user_id, po_id, from_stage, to_stage, qty, type, note)
+               SELECT ?, ?, ?, ?, ?, 'ADJUST', ? WHERE ${INV_OLD_OK}`,
+            ).bind(auth.uid, order.po_number, state.stage, state.stage, newQty,
+              `Sửa Tổng SL ${oldQty} -> ${newQty}`, lot, state.stage, oldQty),
+            env.DB.prepare(
+              `UPDATE Inventory SET quantity = ?, updated_at = CURRENT_TIMESTAMP
+               WHERE UPPER(lot_number) = ? AND stage_id = ? AND quantity = ?`,
+            ).bind(newQty, lot, state.stage, oldQty),
+          );
+        }
+        const res = await env.DB.batch(stmts);
+        if (stmts.length > 1 && Number(res[res.length - 1]?.meta?.changes) < 1) {
+          return jsonResponse({ error: "Tồn của LOT vừa thay đổi, vui lòng tải lại và thử lại!" }, 409);
+        }
+        return jsonResponse({ success: true });
+      }
+
+      // Xóa LOT: chỉ khi LOT chưa chuyển công đoạn (toàn bộ hàng còn ở công đoạn đầu)
+      if (path.startsWith("/api/po/") && method === "DELETE") {
+        const lot = decodeURIComponent(path.replace("/api/po/", "")).trim().toUpperCase();
+        const order = await env.DB.prepare(
+          `SELECT * FROM Production_Orders WHERE UPPER(po_number) = ?`,
+        ).bind(lot).first();
+        if (!order) return jsonResponse({ error: `Không tìm thấy LOT ${lot}!` }, 404);
+        const state = await getLotUntouchedState(env, order);
+        if (!state.untouched) {
+          return jsonResponse({ error: `LOT ${lot} đã chuyển công đoạn hoặc có NG, không thể xóa!` }, 400);
+        }
+        await env.DB.batch([
+          env.DB.prepare(`DELETE FROM Inventory WHERE UPPER(lot_number) = ?`).bind(lot),
+          env.DB.prepare(`DELETE FROM Production_Orders WHERE id = ?`).bind(order.id),
+          env.DB.prepare(
+            `INSERT INTO Transactions_Log (user_id, po_id, from_stage, to_stage, qty, type, note)
+             VALUES (?, ?, ?, 'DELETED', ?, 'DELETE_LOT', 'Xóa LOT chưa sản xuất')`,
+          ).bind(auth.uid, order.po_number, state.stage || "", Number(order.total_qty)),
+        ]);
         return jsonResponse({ success: true });
       }
 

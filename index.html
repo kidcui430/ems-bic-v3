@@ -3,9 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>APP EMS</title>
+    <title>TD-SX-BICJP</title>
     <link rel="stylesheet" href="style.css" />
-    <link rel="manifest" href="manifest.json?v=2" />
+    <link rel="manifest" href="manifest.json?v=3" />
     <meta name="theme-color" content="#193958" />
     <link rel="apple-touch-icon" href="logo192.png" />
   </head>
@@ -103,7 +103,7 @@
         >
           ☰
         </button>
-        <div class="nav-brand">Luân chuyển Sản Xuất (VP)</div>
+        <div class="nav-brand">CÔNG TY TNHH BIC-JAPAN</div>
         <div class="nav-user">
           Xin chào, <strong id="admin-name">Admin</strong> |
           <a
@@ -164,14 +164,14 @@
             data-tab="tab-history"
             onclick="switchTab('admin', 'tab-history', this)"
           >
-            Lịch Sử SX
+            Lịch Sử LUÂN CHUYỂN
           </button>
         </aside>
 
         <main class="content">
           <!-- TAB 1: QUẢN LÝ MÃ HÀNG & LỘ TRÌNH (RIÊNG BIỆT) -->
           <div id="tab-master" class="tab-content hidden">
-            <div class="master-grid">
+            <div class="master-grid master-grid-product">
               <!-- CỘT TRÁI: FORM TẠO / SỬA MÃ HÀNG -->
               <div class="card form-card master-col-left">
                 <div class="card-header-flex">
@@ -222,7 +222,16 @@
                         + Thêm bước
                       </button>
                     </div>
-                    <div id="routing-builder" class="routing-box"></div>
+                    <div class="routing-box">
+                      <div class="routing-head" aria-hidden="true">
+                        <span class="rh-step"></span>
+                        <span class="rh-stage">Công đoạn</span>
+                        <span class="rh-time">Thời gian/pcs</span>
+                        <span class="rh-unit">Đơn vị</span>
+                        <span class="rh-btns"></span>
+                      </div>
+                      <div id="routing-builder"></div>
+                    </div>
                   </div>
                   <div style="display: flex; gap: 8px">
                     <button
@@ -303,7 +312,7 @@
                       type="text"
                       id="stg-id"
                       required
-                      placeholder="VD: CAT, NC1, BARRY..."
+                      placeholder="VD: CAT, NC1, BARY..."
                       style="text-transform: uppercase"
                     />
                   </div>
@@ -313,7 +322,7 @@
                       type="text"
                       id="stg-name"
                       required
-                      placeholder="VD: Cắt, Tiện NC1, Bavia (Barry)..."
+                      placeholder="VD: Cắt, Tiện NC1, Bavia (Bari)..."
                     />
                   </div>
                   <div class="input-group">
@@ -326,7 +335,7 @@
                       id="stg-line"
                       required
                       list="line-suggestions"
-                      placeholder="Chọn hoặc gõ mã Line (VD: BARRY, ASSY, NC...)"
+                      placeholder="Chọn hoặc gõ mã Line (VD: BARI, ASSY, NC...)"
                       style="text-transform: uppercase"
                     />
                     <datalist id="line-suggestions">
@@ -337,7 +346,7 @@
                       <option value="MNC">Line MNC (MNC1, MNC2, MNC3)</option>
                       <option value="GS_GV">Line GS-GV</option>
                       <option value="GP_GE_GI">Line GP-GE-GI</option>
-                      <option value="BARRY">Line Barry (Bavia)</option>
+                      <option value="BARRY">Line Bari (Bavia)</option>
                       <option value="ASSY">
                         Line Assy (Lắp ráp / Đóng thùng / GCN)
                       </option>
@@ -413,7 +422,7 @@
                 <form id="form-create-po">
                   <div class="input-group">
                     <label for="po-prefix"
-                      >Mã Lô Gốc / Số PO (VD: PO1610)</label
+                      >Mã lệnh SX / Số PO (VD: PO1610)</label
                     >
                     <input
                       type="text"
@@ -538,7 +547,11 @@
                     <label for="ng-current-stage"
                       >2. Công đoạn phát sinh NG</label
                     >
-                    <select id="ng-current-stage" required onchange="onChangeNGStage()">
+                    <select
+                      id="ng-current-stage"
+                      required
+                      onchange="onChangeNGStage()"
+                    >
                       <option value="">-- Chọn công đoạn --</option>
                     </select>
                   </div>
@@ -575,9 +588,9 @@
                       <option value="">-- Chọn công đoạn trả về --</option>
                     </select>
                     <small class="field-hint">
-                      Lỗi do công đoạn trước gây ra: chọn công đoạn trước để
-                      trả về làm lại (đã gợi ý sẵn theo lộ trình). Hàng sẽ quay
-                      lại tồn của công đoạn đó.
+                      Lỗi do công đoạn trước gây ra: chọn công đoạn trước để trả
+                      về làm lại (đã gợi ý sẵn theo lộ trình). Hàng sẽ quay lại
+                      tồn của công đoạn đó.
                     </small>
                   </div>
                   <button type="submit" class="btn btn-danger w-100">
@@ -638,15 +651,21 @@
                   và Tồn kho thành phẩm theo thời gian thực.
                 </p>
               </div>
-              <div class="matrix-actions" style="display: flex; gap: 6px; flex-wrap: wrap">
+              <div
+                class="matrix-actions"
+                style="display: flex; gap: 6px; flex-wrap: wrap"
+              >
                 <select
                   id="line-view-select"
                   class="line-view-select"
                   title="Xem màn hình Leader của từng Line (chỉ xem)"
                   aria-label="Xem màn hình Line"
-                  onchange="openLineView(this.value); this.value = '';"
+                  onchange="
+                    openLineView(this.value);
+                    this.value = '';
+                  "
                 >
-                  <option value="">👁 Xem màn hình Line…</option>
+                  <option value="">👁 Xem các Line…</option>
                 </select>
                 <button
                   type="button"
@@ -703,7 +722,7 @@
               </div>
               <div class="filter-row">
                 <div class="filter-item filter-extra">
-                  <label for="search-date-from">Từ ngày cấp phát</label>
+                  <label for="search-date-from">Từ ngày :</label>
                   <input
                     type="date"
                     id="search-date-from"
@@ -712,7 +731,7 @@
                   />
                 </div>
                 <div class="filter-item filter-extra">
-                  <label for="search-date-to">Đến ngày cấp phát</label>
+                  <label for="search-date-to">Đến ngày :</label>
                   <input
                     type="date"
                     id="search-date-to"
@@ -968,8 +987,15 @@
     <!-- MÀN HÌNH LEADER (Giao diện Mobile-First) -->
     <div id="leader-screen" class="screen hidden">
       <div id="admin-view-banner" class="admin-view-banner" role="status">
-        <span>👁 Đang xem màn hình Line <strong id="admin-view-line"></strong> (chỉ xem)</span>
-        <button type="button" class="btn btn-secondary" onclick="closeLineView()">
+        <span
+          >👁 Đang xem màn hình Line <strong id="admin-view-line"></strong> (chỉ
+          xem)</span
+        >
+        <button
+          type="button"
+          class="btn btn-secondary"
+          onclick="closeLineView()"
+        >
           ← Về Admin
         </button>
       </div>

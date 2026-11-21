@@ -107,6 +107,81 @@ function confirmDialog(message, { okText = "Xác nhận", cancelText = "Hủy", 
   });
 }
 
+// Hộp nhập liệu nhỏ: trả về {name: value} hoặc null nếu Hủy.
+// fields: [{ name, label, type, value, disabled, min }]
+function formDialog(title, fields, { okText = "Lưu", cancelText = "Hủy" } = {}) {
+  return new Promise((resolve) => {
+    const previouslyFocused = document.activeElement;
+    const overlay = document.createElement("div");
+    overlay.className = "confirm-overlay";
+    const box = document.createElement("form");
+    box.className = "confirm-box";
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-modal", "true");
+    const h = document.createElement("div");
+    h.className = "confirm-text";
+    h.style.fontWeight = "700";
+    h.textContent = title;
+    box.appendChild(h);
+    const inputs = {};
+    fields.forEach((f) => {
+      const g = document.createElement("div");
+      g.className = "input-group";
+      const lb = document.createElement("label");
+      lb.textContent = f.label;
+      const inp = document.createElement("input");
+      inp.type = f.type || "text";
+      inp.value = f.value ?? "";
+      if (f.min != null) inp.min = f.min;
+      if (f.disabled) inp.disabled = true;
+      lb.htmlFor = inp.id = "fd-" + f.name;
+      g.append(lb, inp);
+      box.appendChild(g);
+      inputs[f.name] = inp;
+    });
+    const actions = document.createElement("div");
+    actions.className = "confirm-actions";
+    const btnCancel = document.createElement("button");
+    btnCancel.type = "button";
+    btnCancel.className = "btn btn-secondary";
+    btnCancel.textContent = cancelText;
+    const btnOk = document.createElement("button");
+    btnOk.type = "submit";
+    btnOk.className = "btn btn-primary";
+    btnOk.textContent = okText;
+    actions.append(btnCancel, btnOk);
+    box.appendChild(actions);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    const finish = (result) => {
+      document.removeEventListener("keydown", onKey, true);
+      overlay.remove();
+      if (previouslyFocused && previouslyFocused.focus) previouslyFocused.focus();
+      resolve(result);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        finish(null);
+      }
+    };
+    document.addEventListener("keydown", onKey, true);
+    btnCancel.addEventListener("click", () => finish(null));
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) finish(null);
+    });
+    box.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const out = {};
+      Object.entries(inputs).forEach(([k, el]) => (out[k] = el.value));
+      finish(out);
+    });
+    const first = Object.values(inputs).find((el) => !el.disabled);
+    (first || btnOk).focus();
+  });
+}
+
 // Gọi API có kèm token đăng nhập. Hết hạn (401) thì tự đăng xuất.
 async function apiFetch(url, options = {}) {
   const headers = { ...(options.headers || {}) };
@@ -151,7 +226,7 @@ const DEFAULT_FACTORY_STAGES = [
   { id: "GP", stage_name: "GP", line_id: "GP_GE_GI" },
   { id: "GE", stage_name: "GE", line_id: "GP_GE_GI" },
   { id: "GI", stage_name: "GI", line_id: "GP_GE_GI" },
-  { id: "BARRY", stage_name: "Bavia (Barry)", line_id: "BARRY" },
+  { id: "BARRY", stage_name: "Bavia (Bari)", line_id: "BARRY" },
   { id: "XUAT_GCN", stage_name: "Đi GCN", line_id: "ASSY" },
   { id: "NHAN_GCN", stage_name: "Nhận GCN", line_id: "ASSY" },
   { id: "LAP_RAP", stage_name: "Lắp ráp", line_id: "ASSY" },
@@ -341,10 +416,21 @@ function navigateToRoleScreen() {
   }
 }
 
+// Tên hiển thị của mã Line (mã nội bộ giữ nguyên trong D1)
+const LINE_LABELS = { BARRY: "BARI" };
+function lineLabel(lineId) {
+  const id = String(lineId || "");
+  return LINE_LABELS[id.toUpperCase()] || id;
+}
+// Sửa chính tả khi hiển thị, không đổi dữ liệu trên D1 (VD "Bavia (Barry)" -> "Bavia (Bari)")
+function fixDisplayName(name) {
+  return String(name ?? "").replace(/Barry/g, "Bari").replace(/BARRY/g, "BARI");
+}
+
 function fillLeaderLineLabel(lineId) {
   const myStages = globalStages.filter((s) => s.line_id === lineId);
   document.getElementById("leader-line").textContent =
-    myStages.length > 0 ? myStages.map((s) => s.stage_name).join(", ") : lineId;
+    myStages.length > 0 ? myStages.map((s) => s.stage_name).join(", ") : lineLabel(lineId);
 }
 
 // Danh sách line cho ô "Xem màn hình Line" ở dashboard Admin (theo thứ tự công đoạn)
@@ -356,7 +442,7 @@ function fillLineViewSelect() {
   ];
   sel.innerHTML =
     '<option value="">👁 Xem màn hình Line…</option>' +
-    lines.map((l) => `<option value="${esc(l)}">Line ${esc(l)}</option>`).join("");
+    lines.map((l) => `<option value="${esc(l)}">Line ${esc(lineLabel(l))}</option>`).join("");
 }
 
 // Admin mở màn hình Leader của một line (chỉ xem)
@@ -375,7 +461,7 @@ window.openLineView = function (lineId) {
   document.getElementById("leader-name").textContent =
     currentUser.full_name || currentUser.username || "Admin";
   const bannerLine = document.getElementById("admin-view-line");
-  if (bannerLine) bannerLine.textContent = lineId;
+  if (bannerLine) bannerLine.textContent = lineLabel(lineId);
   fillLeaderLineLabel(lineId);
   document
     .getElementById("btn-outsource")
@@ -522,7 +608,7 @@ async function loadNGDropdownsThorough() {
     const stageData = await stageRes.json();
     globalStages =
       Array.isArray(stageData.data) && stageData.data.length > 0
-        ? stageData.data
+        ? stageData.data.map((s) => ({ ...s, stage_name: fixDisplayName(s.stage_name) }))
         : [...DEFAULT_FACTORY_STAGES];
   } catch (e) {
     if (globalStages.length === 0) {
@@ -621,7 +707,7 @@ function renderStagesTable() {
       <td>${idx + 1}</td>
       <td style="font-weight:bold; color:var(--navy);">${esc(stg.id)}</td>
       <td style="text-align:left; font-weight:600;">${esc(stg.stage_name)}</td>
-      <td><span style="background:${bg}; padding:3px 10px; border-radius:4px; border:1px solid #cbd5e0; font-weight:600;">Line: ${esc(stg.line_id || "-")}</span></td>
+      <td><span style="background:${bg}; padding:3px 10px; border-radius:4px; border:1px solid #cbd5e0; font-weight:600;">Line: ${esc(lineLabel(stg.line_id) || "-")}</span></td>
       <td>
         <div class="action-btn-group">
           <button type="button" class="btn-icon" title="Lên" onclick="moveStageOrder(${idx}, -1)" ${idx === 0 ? "disabled" : ""}>▲</button>
@@ -861,7 +947,58 @@ if (formStageManager) {
 // ==========================================
 // 3. QUẢN LÝ MÃ HÀNG & LỘ TRÌNH (ĐỒNG BỘ TRỰC TIẾP D1)
 // ==========================================
-window.addRoutingStep = function (selectedStageId = "") {
+// ===== Thời gian chuẩn công đoạn (giờ/pcs), lưu trong routing_map =====
+const TIME_UNIT_FACTORS = { h: 1, min: 1 / 60, s: 1 / 3600 };
+
+function toHours(value, unit) {
+  const v = Number(value);
+  if (!isFinite(v) || v <= 0) return 0;
+  return v * (TIME_UNIT_FACTORS[unit] || 1);
+}
+
+// 0.0125 h, 0.6 h, 1.25 h, 95.5 h (dấu chấm thập phân, bỏ số 0 thừa)
+function formatHours(h) {
+  const n = Number(h) || 0;
+  const rounded = n < 1 ? n.toFixed(4) : n < 10 ? n.toFixed(2) : n.toFixed(1);
+  return `${parseFloat(rounded)} h`;
+}
+
+let routingTimesCache = {};
+// Trả về { perStage: {STAGE_ID: giờ/pcs}, totalPerPcs, missing: [tên công đoạn thiếu], hasAny }
+function getRoutingTimes(productCode) {
+  const key = String(productCode || "").toUpperCase();
+  if (routingTimesCache[key]) return routingTimesCache[key];
+  const result = { perStage: {}, totalPerPcs: 0, missing: [], hasAny: false };
+  const p = productsCache.find(
+    (item) => String(item.product_code || "").toUpperCase() === key,
+  );
+  if (p) {
+    try {
+      const steps =
+        typeof p.routing_map === "string"
+          ? JSON.parse(p.routing_map)
+          : p.routing_map || [];
+      steps.forEach((st) => {
+        const id = String(st.stage_id || "").toUpperCase();
+        const hrs = Number(st.hours_per_pcs) || 0;
+        if (hrs > 0) {
+          result.perStage[id] = (result.perStage[id] || 0) + hrs;
+          result.totalPerPcs += hrs;
+          result.hasAny = true;
+        } else {
+          result.missing.push(getStageNameById(id));
+        }
+      });
+    } catch (e) {
+      console.error("Lỗi đọc thời gian công đoạn:", e);
+    }
+  }
+  routingTimesCache[key] = result;
+  return result;
+}
+
+// Thời gian công đoạn nhập theo PHÚT/pcs (đơn vị duy nhất), lưu kèm hours_per_pcs để tính giờ
+window.addRoutingStep = function (selectedStageId = "", timeMinutes = "") {
   const container = document.getElementById("routing-builder");
   if (!container) return;
   const stepDiv = document.createElement("div");
@@ -872,6 +1009,9 @@ window.addRoutingStep = function (selectedStageId = "") {
       <option value="">-- Chọn công đoạn --</option>
       ${globalStages.map((s) => `<option value="${esc(s.id)}" ${s.id === selectedStageId ? "selected" : ""}>${esc(s.stage_name)} (${esc(s.id)})</option>`).join("")}
     </select>
+    <input type="number" class="routing-time-input" min="0" step="any" inputmode="decimal"
+      placeholder="VD 36" title="Thời gian gia công cho 1 pcs (phút)" value="${esc(timeMinutes)}" />
+    <span class="routing-time-unit">phút/pcs</span>
     <button type="button" class="btn-icon" title="Chuyển lên" onclick="moveRoutingStep(this, -1)">▲</button>
     <button type="button" class="btn-icon" title="Chuyển xuống" onclick="moveRoutingStep(this, 1)">▼</button>
     <button type="button" class="btn-icon btn-icon-del" title="Xóa bước này" onclick="removeRoutingStep(this)">✕</button>
@@ -916,9 +1056,31 @@ if (formCreateProduct) {
     const productName = document.getElementById("md-product-name").value.trim();
 
     const routingMap = [];
-    document.querySelectorAll(".routing-stage-select").forEach((sel, idx) => {
-      if (sel.value) routingMap.push({ order: idx + 1, stage_id: sel.value });
-    });
+    let badTime = false;
+    document
+      .querySelectorAll("#routing-builder .routing-step-row")
+      .forEach((row) => {
+        const sel = row.querySelector(".routing-stage-select");
+        if (!sel || !sel.value) return;
+        const step = { order: routingMap.length + 1, stage_id: sel.value };
+        const rawTime = row.querySelector(".routing-time-input")?.value.trim();
+        const unit = "min";
+        if (rawTime) {
+          const v = Number(rawTime);
+          if (!isFinite(v) || v < 0) {
+            badTime = true;
+          } else if (v > 0) {
+            step.time_value = v;
+            step.time_unit = unit;
+            step.hours_per_pcs = Number(toHours(v, unit).toFixed(6));
+          }
+        }
+        routingMap.push(step);
+      });
+
+    if (badTime) {
+      return notify("Thời gian công đoạn phải là số không âm (VD: 0.6 giờ, 45 giây)!");
+    }
 
     if (routingMap.length === 0) {
       return notify("Vui lòng thêm ít nhất 1 công đoạn vào lộ trình sản xuất!");
@@ -1013,7 +1175,10 @@ window.startEditProduct = function (productCode) {
     steps
       .sort((a, b) => (a.order || 0) - (b.order || 0))
       .forEach((step) => {
-        addRoutingStep(step.stage_id);
+        // Mọi bản ghi (kể cả bản cũ lưu theo giờ/giây) hiện lại theo phút
+        const hrs = Number(step.hours_per_pcs) || 0;
+        const minutes = hrs > 0 ? Number((hrs * 60).toFixed(4)) : "";
+        addRoutingStep(step.stage_id, minutes);
       });
   } catch (e) {
     addRoutingStep();
@@ -1198,6 +1363,7 @@ async function fetchProductsList() {
     );
     const data = await response.json();
     productsCache = Array.isArray(data.products) ? data.products : [];
+    routingTimesCache = {};
   } catch (e) {
     console.error("Lỗi tải danh sách mã hàng:", e);
   }
@@ -1247,9 +1413,18 @@ function renderMasterTable(data) {
       routingText = steps
         .map((step, idx) => {
           const stName = getStageNameById(step.stage_id);
-          return `<span class="route-pill">${idx + 1}. ${esc(stName)}</span>`;
+          const hrs = Number(step.hours_per_pcs) || 0;
+          const timeTag = hrs > 0 ? ` · ${esc(formatHours(hrs))}` : "";
+          return `<span class="route-pill">${idx + 1}. ${esc(stName)}${timeTag}</span>`;
         })
         .join(` <span style="color:#94a3b8;">➔</span> `);
+      const times = getRoutingTimes(p.product_code);
+      if (times.hasAny) {
+        const miss = times.missing.length
+          ? ` <span class="text-error">(thiếu ${times.missing.length} công đoạn)</span>`
+          : "";
+        routingText += `<div class="route-time-total">⏱ Tổng: ${esc(formatHours(times.totalPerPcs))}/pcs${miss}</div>`;
+      }
     } catch (e) {
       routingText = `<span class="text-error">Lỗi lộ trình</span>`;
     }
@@ -1317,6 +1492,16 @@ window.previewLotSplit = function () {
 
   previewBox.classList.remove("hidden");
   previewBox.innerHTML = `<strong>Dự kiến chẻ thành ${lots.length} LOT:</strong> ${esc(lots.slice(0, 8).join(", "))}${lots.length > 8 ? ` ... (+${lots.length - 8} LOT)` : ""}`;
+
+  // Ước tính tổng giờ chuẩn theo thời gian công đoạn của mã hàng
+  const productCode = document.getElementById("product-code")?.value || "";
+  const times = getRoutingTimes(productCode);
+  if (times.hasAny) {
+    const miss = times.missing.length
+      ? ` (chưa có thời gian: ${times.missing.join(", ")})`
+      : "";
+    previewBox.innerHTML += `<div style="margin-top:4px;">⏱ Tổng giờ chuẩn ≈ <strong>${esc(formatHours(times.totalPerPcs * totalQty))}</strong> (${esc(formatHours(times.totalPerPcs))}/pcs × ${totalQty} pcs)${esc(miss)}</div>`;
+  }
 };
 
 const formCreatePO = document.getElementById("form-create-po");
@@ -1354,18 +1539,38 @@ if (formCreatePO) {
       counter++;
     }
 
+    // Chống trùng: mã PO chỉ được cấp phát 1 lần
+    try {
+      const chk = await apiFetch(
+        `${API_BASE_URL}/api/po/check?prefix=${encodeURIComponent(prefix)}`,
+        { cache: "no-store" },
+      );
+      const chkData = await chk.json().catch(() => ({}));
+      const used = Array.isArray(chkData.lots) ? chkData.lots : [];
+      if (chk.ok && used.length > 0) {
+        const codes = [...new Set(used.map((u) => u.product_code).filter(Boolean))];
+        return notify(
+          `Mã PO "${prefix}" đã được cấp phát trước đó (${used.length} LOT${codes.length ? `, mã hàng ${codes.join(", ")}` : ""}). Mỗi mã PO chỉ dùng 1 lần, vui lòng nhập mã PO khác!`,
+        );
+      }
+    } catch (err) {
+      console.error("Lỗi kiểm tra trùng mã PO:", err);
+    }
+
     const confirmMsg = `Hệ thống sẽ chẻ thành ${lots.length} LOT (${lots.map((l) => l.qty).join(", ")}).\nBạn có chắc chắn muốn cấp phát sản xuất?`;
     if (!(await confirmDialog(confirmMsg, { okText: "Cấp phát" }))) return;
 
     let successCount = 0;
     let errorMessages = [];
 
-    for (const lot of lots) {
+    for (const [lotIdx, lot] of lots.entries()) {
       try {
         const response = await apiFetch(`${API_BASE_URL}/api/po/create`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            prefix,
+            batch_first: lotIdx === 0,
             po_number: lot.po_number,
             product_code: productCode,
             production_date: poDate,
@@ -1379,6 +1584,7 @@ if (formCreatePO) {
           successCount++;
         } else {
           errorMessages.push(`Lỗi LOT ${lot.po_number}: ${data.error}`);
+          if (lotIdx === 0) break; // LOT đầu lỗi (VD trùng mã PO) thì dừng, không tạo tiếp
         }
       } catch (err) {
         errorMessages.push(`Lỗi kết nối khi tạo LOT ${lot.po_number}`);
@@ -1440,11 +1646,16 @@ window.renderPOManageTable = function () {
         <th>Đang Chạy (WIP)</th>
         <th>Tổng NG</th>
         <th>Vào KHO</th>
+        <th style="width: 115px;">Thao Tác</th>
       </tr>
     </thead>
     <tbody>`;
 
   visibleRows.forEach((r) => {
+    const fresh = isLotUntouched(r);
+    const delAttr = fresh
+      ? `title="Xóa LOT chưa sản xuất"`
+      : `disabled title="LOT đã chuyển công đoạn, không thể xóa"`;
     html += `<tr>
       <td>${formatDateVN(r.production_date)}</td>
       <td style="font-weight:bold; color:var(--navy);">${esc(r.po_number)}</td>
@@ -1453,11 +1664,88 @@ window.renderPOManageTable = function () {
       <td style="color:#0284c7; font-weight:600;">${r.wip_qty}</td>
       <td style="color:var(--maroon); font-weight:bold;">${r.total_ng > 0 ? r.total_ng : "-"}</td>
       <td style="color:var(--green); font-weight:bold;">${r.finished_qty > 0 ? r.finished_qty : "-"}</td>
+      <td style="text-align:center;">
+        <div class="action-btn-group">
+          <button type="button" class="btn-icon btn-icon-edit" data-lot="${esc(r.po_number)}" onclick="startEditLot(this.dataset.lot)">Sửa</button>
+          <button type="button" class="btn-icon btn-icon-del" data-lot="${esc(r.po_number)}" onclick="deleteLot(this.dataset.lot)" ${delAttr}>Xóa</button>
+        </div>
+      </td>
     </tr>`;
   });
 
   html += `</tbody></table>`;
   container.innerHTML = html;
+};
+
+// LOT chưa sản xuất: toàn bộ hàng còn nguyên ở 1 công đoạn, chưa NG, chưa vào kho
+function isLotUntouched(r) {
+  if (!r || r.total_ng > 0 || r.finished_qty > 0) return false;
+  const active = Object.values(r.stages || {}).filter((st) => st.good > 0 || st.ng > 0);
+  return active.length === 1 && active[0].ng === 0 && active[0].good === r.total_qty;
+}
+
+window.startEditLot = async function (lotNo) {
+  const r = currentMatrixData?.rows?.find((x) => x.po_number === lotNo);
+  if (!r) return;
+  const fresh = isLotUntouched(r);
+  const values = await formDialog(`Sửa LOT ${lotNo} [${r.product_code}]`, [
+    { name: "production_date", label: "Ngày cấp", type: "date", value: r.production_date || "" },
+    {
+      name: "total_qty",
+      label: fresh ? "Tổng SL" : "Tổng SL (LOT đã chuyển công đoạn, không đổi được)",
+      type: "number",
+      value: r.total_qty,
+      disabled: !fresh,
+      min: 1,
+    },
+  ]);
+  if (!values) return;
+  const qty = parseInt(values.total_qty);
+  if (fresh && (!Number.isInteger(qty) || qty <= 0)) {
+    return notify("Tổng SL phải là số nguyên lớn hơn 0!");
+  }
+  try {
+    const res = await apiFetch(`${API_BASE_URL}/api/po/${encodeURIComponent(lotNo)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        production_date: values.production_date,
+        total_qty: fresh ? qty : r.total_qty,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return notify("Không thể sửa LOT: " + (data.error || "Lỗi máy chủ"));
+    notify(`Đã cập nhật LOT ${lotNo}.`);
+    await fetchMatrixReport();
+  } catch (e) {
+    notify("Lỗi kết nối API khi sửa LOT!");
+  }
+};
+
+window.deleteLot = async function (lotNo) {
+  const r = currentMatrixData?.rows?.find((x) => x.po_number === lotNo);
+  if (!r) return;
+  if (!isLotUntouched(r)) {
+    return notify(`LOT ${lotNo} đã chuyển công đoạn hoặc có NG, không thể xóa!`);
+  }
+  if (
+    !(await confirmDialog(
+      `Xóa LOT ${lotNo} [${r.product_code}] - ${r.total_qty} pcs?\nLOT và tồn tại công đoạn đầu sẽ bị xóa khỏi D1.`,
+      { okText: "Xóa", danger: true },
+    ))
+  )
+    return;
+  try {
+    const res = await apiFetch(`${API_BASE_URL}/api/po/${encodeURIComponent(lotNo)}`, {
+      method: "DELETE",
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return notify("Không thể xóa LOT: " + (data.error || "Lỗi máy chủ"));
+    notify(`Đã xóa LOT ${lotNo}.`);
+    await fetchMatrixReport();
+  } catch (e) {
+    notify("Lỗi kết nối API khi xóa LOT!");
+  }
 };
 
 // Gợi ý công đoạn trả về = công đoạn đứng ngay trước công đoạn lỗi trong routing của mã hàng
@@ -1989,6 +2277,17 @@ function getActiveColumns(rows) {
   );
 }
 
+// Tổng giờ chuẩn của LOT = Tổng SL x tổng giờ/pcs của lộ trình
+function lotHoursInfo(row) {
+  const t = getRoutingTimes(row.product_code);
+  return {
+    hasAny: t.hasAny,
+    hours: t.hasAny ? row.total_qty * t.totalPerPcs : 0,
+    missing: t.missing,
+    perStage: t.perStage,
+  };
+}
+
 function renderMatrixTable(rows) {
   const container = document.getElementById("matrix-table-container");
   if (!currentMatrixData || !container) return;
@@ -1999,6 +2298,7 @@ function renderMatrixTable(rows) {
   tableHTML += `<th rowspan="2" class="col-lot" style="vertical-align: middle;">Số LOT</th>`;
   tableHTML += `<th rowspan="2" style="vertical-align: middle;">Mã Hàng</th>`;
   tableHTML += `<th rowspan="2" class="col-hide-phone" style="vertical-align: middle;">Tổng SL</th>`;
+  tableHTML += `<th rowspan="2" class="col-hours" style="vertical-align: middle;" title="Tổng SL × tổng thời gian công đoạn/pcs">Tổng giờ</th>`;
 
   activeCols.forEach((col) => {
     const bg = LINE_COLORS[col.line_id] || "#edf2f7";
@@ -2017,7 +2317,7 @@ function renderMatrixTable(rows) {
   tableHTML += `</tr></thead><tbody>`;
 
   if (rows.length === 0) {
-    tableHTML += `<tr><td colspan="${activeCols.length * 2 + 6}" style="text-align: center; padding: 24px;">Không tìm thấy dữ liệu phù hợp với bộ lọc.</td></tr>`;
+    tableHTML += `<tr><td colspan="${activeCols.length * 2 + 7}" style="text-align: center; padding: 24px;">Không tìm thấy dữ liệu phù hợp với bộ lọc.</td></tr>`;
   }
 
   let sumTotal = 0;
@@ -2028,16 +2328,28 @@ function renderMatrixTable(rows) {
     colSums[c.id] = { good: 0, ng: 0 };
   });
 
+  let sumHours = 0;
   rows.forEach((row) => {
     sumTotal += row.total_qty;
     sumAllNG += row.total_ng;
     sumKho += row.finished_qty;
+    const hi = lotHoursInfo(row);
+    sumHours += hi.hours;
+    let hoursCell = `<td class="col-hours"><span class="cell-empty">-</span></td>`;
+    if (hi.hasAny) {
+      const star = hi.missing.length ? "*" : "";
+      const tip = hi.missing.length
+        ? `Chưa có thời gian: ${hi.missing.join(", ")}`
+        : `${row.total_qty} pcs × ${formatHours(hi.hours / (row.total_qty || 1))}/pcs`;
+      hoursCell = `<td class="col-hours has-tooltip" data-time="${esc(tip)}">${esc(formatHours(hi.hours))}${star}</td>`;
+    }
 
     tableHTML += `<tr>
       <td class="col-hide-phone">${formatDateVN(row.production_date)}</td>
       <td class="col-lot" style="font-weight:bold; color:var(--navy);">${esc(row.po_number)}</td>
       <td style="font-weight:600;">${esc(row.product_code)}</td>
-      <td class="col-hide-phone" style="font-weight:bold;">${row.total_qty}</td>`;
+      <td class="col-hide-phone" style="font-weight:bold;">${row.total_qty}</td>
+      ${hoursCell}`;
 
     activeCols.forEach((col) => {
       const stg = row.stages[col.id];
@@ -2064,6 +2376,10 @@ function renderMatrixTable(rows) {
       colSums[col.id].good += goodVal;
       colSums[col.id].ng += ngVal;
 
+      const stageHrs = hi.perStage[String(col.id).toUpperCase()] || 0;
+      if (goodVal > 0 && stageHrs > 0) {
+        timeStr += ` · ${goodVal} pcs × ${formatHours(stageHrs)} = ${formatHours(goodVal * stageHrs)}`;
+      }
       tableHTML +=
         goodVal > 0
           ? `<td class="has-tooltip" data-time="${esc(timeStr)}" style="background-color: ${bg}; text-align:center;"><span class="badge-good">${goodVal}</span></td>`
@@ -2095,7 +2411,8 @@ function renderMatrixTable(rows) {
   if (rows.length > 0) {
     tableHTML += `<tfoot><tr class="matrix-tfoot-row">
       <td colspan="3" style="text-align:right; font-weight:bold;">TỔNG CỘNG (${rows.length} LOT):</td>
-      <td style="font-weight:bold;">${sumTotal}</td>`;
+      <td style="font-weight:bold;">${sumTotal}</td>
+      <td class="col-hours" style="font-weight:bold;">${sumHours > 0 ? esc(formatHours(sumHours)) : "-"}</td>`;
 
     activeCols.forEach((col) => {
       const s = colSums[col.id];
@@ -2123,7 +2440,7 @@ window.exportMatrixExcel = function () {
   const codeFilter = document.getElementById("search-code")?.value || "Tất cả";
   const lotFilter = document.getElementById("search-lot")?.value || "Tất cả";
   const cols = getActiveColumns(filteredMatrixRows);
-  const totalTableCols = cols.length * 2 + 6;
+  const totalTableCols = cols.length * 2 + 7;
 
   let sumTotal = 0;
   let sumAllNG = 0;
@@ -2160,7 +2477,8 @@ window.exportMatrixExcel = function () {
           <th rowspan="2" class="th-main">Ngày Cấp</th>
           <th rowspan="2" class="th-main">Số LOT</th>
           <th rowspan="2" class="th-main">Mã Hàng</th>
-          <th rowspan="2" class="th-main">Tổng SL</th>`;
+          <th rowspan="2" class="th-main">Tổng SL</th>
+          <th rowspan="2" class="th-main">Tổng giờ (h)</th>`;
 
   cols.forEach((col) => {
     html += `<th colspan="2" class="th-main">${esc(col.stage_name)}</th>`;
@@ -2177,16 +2495,20 @@ window.exportMatrixExcel = function () {
 
   html += `</tr></thead><tbody>`;
 
+  let sumHours = 0;
   filteredMatrixRows.forEach((row) => {
     sumTotal += row.total_qty;
     sumAllNG += row.total_ng;
     sumKho += row.finished_qty;
+    const hi = lotHoursInfo(row);
+    sumHours += hi.hours;
 
     html += `<tr>
       <td>${formatDateVN(row.production_date)}</td>
       <td style="font-weight:bold;">${esc(row.po_number)}</td>
       <td>${esc(row.product_code)}</td>
-      <td style="font-weight:bold;">${row.total_qty}</td>`;
+      <td style="font-weight:bold;">${row.total_qty}</td>
+      <td>${hi.hasAny ? Number(hi.hours.toFixed(2)) : ""}</td>`;
 
     cols.forEach((col) => {
       const stg = row.stages[col.id];
@@ -2206,7 +2528,8 @@ window.exportMatrixExcel = function () {
   html += `</tbody><tfoot>
     <tr class="tfoot-row">
       <td colspan="3" style="text-align:right;">TỔNG CỘNG (${filteredMatrixRows.length} LOT):</td>
-      <td>${sumTotal}</td>`;
+      <td>${sumTotal}</td>
+      <td>${Number(sumHours.toFixed(2))}</td>`;
 
   cols.forEach((col) => {
     html += `<td>${colSums[col.id].good}</td>`;
@@ -2233,7 +2556,7 @@ window.exportMatrixCSV = function () {
     return notify("Chưa có dữ liệu để xuất CSV!");
   }
   const cols = getActiveColumns(filteredMatrixRows);
-  const headers = ["Ngày Cấp", "Số LOT", "Mã Hàng", "Tổng SL"];
+  const headers = ["Ngày Cấp", "Số LOT", "Mã Hàng", "Tổng SL", "Tổng giờ (h)"];
   cols.forEach((c) => {
     headers.push(`${c.stage_name} (OK)`);
     headers.push(`${c.stage_name} (NG)`);
@@ -2248,6 +2571,10 @@ window.exportMatrixCSV = function () {
       row.po_number,
       row.product_code,
       row.total_qty,
+      (() => {
+        const hi = lotHoursInfo(row);
+        return hi.hasAny ? Number(hi.hours.toFixed(2)) : "";
+      })(),
     ];
     cols.forEach((c) => {
       const stg = row.stages[c.id];

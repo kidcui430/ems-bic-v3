@@ -1,7 +1,7 @@
 {
   "id": "/",
-  "name": "Quản Lý Luân Chuyển Sản Xuất",
-  "short_name": "EMS",
+  "name": "SX-BIC",
+  "short_name": "SX-BIC",
   "description": "Phần mềm quản lý luân chuyển công đoạn sản xuất và theo dõi WIP/NG",
   "start_url": "/index.html",
   "display": "standalone",

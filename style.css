@@ -1233,3 +1233,149 @@ select:focus,
     font-size: 18px;
   }
 }
+
+/* ===== Thời gian chuẩn công đoạn (giờ/pcs): 1 dòng = Bước | Công đoạn | Thời gian | Đơn vị | ▲▼✕ ===== */
+#routing-builder .routing-step-row,
+.routing-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+#routing-builder .step-label,
+.routing-head .rh-step {
+  flex: 0 0 54px;
+  min-width: 54px;
+}
+#routing-builder .routing-stage-select,
+.routing-head .rh-stage {
+  flex: 1 1 auto;
+  width: auto !important;
+  min-width: 150px;
+}
+#routing-builder .routing-time-input,
+.routing-head .rh-time {
+  flex: 0 0 78px;
+  width: 78px !important;
+  min-width: 0;
+}
+#routing-builder .routing-time-unit,
+.routing-head .rh-unit {
+  flex: 0 0 92px;
+  width: 92px !important;
+  min-width: 0;
+}
+#routing-builder .routing-stage-select,
+#routing-builder .routing-time-input,
+#routing-builder .routing-time-unit {
+  min-height: 36px;
+  padding: 6px 8px !important;
+  border: 1px solid #ccd7e4;
+  border-radius: 7px;
+  background: white;
+  font-size: 13px !important;
+}
+#routing-builder .routing-time-input {
+  text-align: right;
+}
+#routing-builder .routing-time-unit {
+  padding: 6px 4px !important;
+}
+#routing-builder .btn-icon {
+  flex: 0 0 30px;
+  width: 30px;
+  height: 32px;
+  padding: 0;
+}
+.routing-head .rh-btns {
+  flex: 0 0 102px;
+}
+.routing-head {
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--gray-dark);
+}
+.routing-head .rh-time,
+.routing-head .rh-unit {
+  text-align: center;
+}
+/* Ẩn hàng tiêu đề khi chưa có bước nào */
+.routing-head:has(+ #routing-builder:empty) {
+  display: none;
+}
+.master-grid-product .master-col-left {
+  flex: 1.35;
+  min-width: 480px;
+}
+.master-grid-product .master-col-right {
+  flex: 1.5;
+  min-width: 420px;
+}
+.route-time-total {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--navy);
+}
+.matrix-table .col-hours {
+  background: #f8fafc;
+  color: #0f4c81;
+  font-weight: 650;
+}
+@media (max-width: 1000px) {
+  .master-grid-product .master-col-left,
+  .master-grid-product .master-col-right {
+    min-width: 100% !important;
+  }
+}
+/* Điện thoại: mỗi bước 2 dòng gọn */
+@media (max-width: 640px) {
+  .routing-head {
+    display: none;
+  }
+  #routing-builder .routing-step-row {
+    flex-wrap: wrap;
+    row-gap: 6px;
+    padding-bottom: 8px;
+    border-bottom: 1px dashed #cbd7e4;
+  }
+  #routing-builder .routing-step-row:last-child {
+    border-bottom: 0;
+    padding-bottom: 0;
+  }
+  #routing-builder .routing-stage-select {
+    flex: 1 1 calc(100% - 60px);
+    min-width: 0;
+  }
+  #routing-builder .routing-time-input {
+    flex: 1 1 auto;
+    width: auto !important;
+  }
+  #routing-builder .routing-time-unit {
+    flex: 0 0 88px;
+    width: 88px !important;
+  }
+  #routing-builder .routing-stage-select,
+  #routing-builder .routing-time-input,
+  #routing-builder .routing-time-unit {
+    min-height: 44px;
+    font-size: 16px !important;
+  }
+  #routing-builder .btn-icon {
+    flex: 0 0 36px;
+    width: 36px;
+    height: 40px;
+  }
+}
+
+/* Đơn vị nhập cố định phút/pcs (vẫn lưu và tính theo giờ): chỉ là nhãn chữ */
+#routing-builder span.routing-time-unit {
+  display: flex;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--gray-dark);
+  font-size: 12.5px !important;
+  white-space: nowrap;
+}

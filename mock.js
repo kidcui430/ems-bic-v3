@@ -52,7 +52,7 @@
       {
         id: 5,
         username: "LD_BARRY",
-        full_name: "Tổ Trưởng Bavia (Barry)",
+        full_name: "Tổ Trưởng Bavia (Bari)",
         role: "LEADER",
         line_id: "BARRY",
         password_hash: "1234",
@@ -118,7 +118,7 @@
       {
         id: "BARRY",
         line_id: "BARRY",
-        stage_name: "Bavia (Barry)",
+        stage_name: "Bavia (Bari)",
         sort_order: 15,
       },
       { id: "XUAT_GCN", line_id: "ASSY", stage_name: "Đi GCN", sort_order: 16 },
@@ -148,10 +148,10 @@
         product_code: "ASW-40",
         product_name: "Thanh trục phi 40",
         routing_map: JSON.stringify([
-          { order: 1, stage_id: "CAT" },
-          { order: 2, stage_id: "DO_CUNG" },
-          { order: 3, stage_id: "NC2" },
-          { order: 4, stage_id: "BARRY" },
+          { order: 1, stage_id: "CAT", time_value: 45, time_unit: "s", hours_per_pcs: 0.0125 },
+          { order: 2, stage_id: "DO_CUNG", time_value: 30, time_unit: "s", hours_per_pcs: 0.008333 },
+          { order: 3, stage_id: "NC2", time_value: 0.6, time_unit: "h", hours_per_pcs: 0.6 },
+          { order: 4, stage_id: "BARRY", time_value: 2, time_unit: "min", hours_per_pcs: 0.033333 },
           { order: 5, stage_id: "DONG_THUNG" },
         ]),
       },
@@ -160,15 +160,15 @@
         product_code: "TB-30",
         product_name: "Liner motion bearing",
         routing_map: JSON.stringify([
-          { order: 1, stage_id: "CAT" },
-          { order: 2, stage_id: "NC1" },
-          { order: 3, stage_id: "NHIET_LUYEN" },
-          { order: 4, stage_id: "DO_CUNG" },
-          { order: 5, stage_id: "GP" },
-          { order: 6, stage_id: "GI" },
-          { order: 7, stage_id: "LAP_RAP" },
-          { order: 8, stage_id: "KIEM_TRA" },
-          { order: 9, stage_id: "DONG_THUNG" },
+          { order: 1, stage_id: "CAT", time_value: 40, time_unit: "s", hours_per_pcs: 0.011111 },
+          { order: 2, stage_id: "NC1", time_value: 6, time_unit: "min", hours_per_pcs: 0.1 },
+          { order: 3, stage_id: "NHIET_LUYEN", time_value: 0.05, time_unit: "h", hours_per_pcs: 0.05 },
+          { order: 4, stage_id: "DO_CUNG", time_value: 30, time_unit: "s", hours_per_pcs: 0.008333 },
+          { order: 5, stage_id: "GP", time_value: 4, time_unit: "min", hours_per_pcs: 0.066667 },
+          { order: 6, stage_id: "GI", time_value: 5, time_unit: "min", hours_per_pcs: 0.083333 },
+          { order: 7, stage_id: "LAP_RAP", time_value: 3, time_unit: "min", hours_per_pcs: 0.05 },
+          { order: 8, stage_id: "KIEM_TRA", time_value: 1, time_unit: "min", hours_per_pcs: 0.016667 },
+          { order: 9, stage_id: "DONG_THUNG", time_value: 20, time_unit: "s", hours_per_pcs: 0.005556 },
         ]),
       },
     ],
@@ -323,10 +323,65 @@
       return JSON.parse(JSON.stringify(INITIAL_MOCK_DB));
     }
     try {
-      return JSON.parse(raw);
+      return migrateMockDB(JSON.parse(raw));
     } catch (e) {
       return JSON.parse(JSON.stringify(INITIAL_MOCK_DB));
     }
+  }
+
+  // Dữ liệu mock đã lưu từ bản cũ chưa có thời gian công đoạn: chép thời gian mẫu sang
+  // (chỉ cho mã hàng mẫu, ghép theo stage_id; không đụng LOT hay mã hàng tự tạo).
+  function migrateMockDB(db) {
+    let changed = false;
+    (INITIAL_MOCK_DB.products || []).forEach((seed) => {
+      const saved = (db.products || []).find(
+        (p) => p.product_code === seed.product_code,
+      );
+      if (!saved) return;
+      let steps;
+      try {
+        steps = JSON.parse(saved.routing_map || "[]");
+      } catch (e) {
+        return;
+      }
+      if (steps.some((st) => st.hours_per_pcs)) return;
+      const seedTimes = {};
+      JSON.parse(seed.routing_map).forEach((st) => {
+        if (st.hours_per_pcs) seedTimes[st.stage_id] = st;
+      });
+      steps = steps.map((st) => {
+        const t = seedTimes[st.stage_id];
+        return t
+          ? { ...st, time_value: t.time_value, time_unit: t.time_unit, hours_per_pcs: t.hours_per_pcs }
+          : st;
+      });
+      saved.routing_map = JSON.stringify(steps);
+      changed = true;
+    });
+    if (changed) localStorage.setItem(MOCK_STORAGE_KEY, JSON.stringify(db));
+    return db;
+  }
+
+  function mockLotsByPrefix(db, prefixUp) {
+    const hit = (n) => {
+      const up = String(n || "").toUpperCase();
+      return up === prefixUp || up.startsWith(prefixUp + "-");
+    };
+    const seen = new Set();
+    const out = [];
+    db.orders.forEach((o) => {
+      if (hit(o.po_number) && !seen.has(o.po_number)) {
+        seen.add(o.po_number);
+        out.push({ po_number: o.po_number, product_code: o.product_id });
+      }
+    });
+    db.inventory.forEach((i) => {
+      if (hit(i.lot_number) && !seen.has(i.lot_number)) {
+        seen.add(i.lot_number);
+        out.push({ po_number: i.lot_number, product_code: i.product_id });
+      }
+    });
+    return out;
   }
 
   function saveDB(db) {
@@ -522,6 +577,10 @@
           String(body.product_code || "").toUpperCase(),
       );
       if (!prod) return makeJsonRes({ error: "Mã hàng chưa khai báo!" }, 400);
+      const prefixUp = String(body.prefix || "").toUpperCase();
+      if (prefixUp && body.batch_first && mockLotsByPrefix(db, prefixUp).length > 0) {
+        return makeJsonRes({ error: `Mã PO "${prefixUp}" đã được cấp phát. Mỗi mã PO chỉ dùng 1 lần!` }, 400);
+      }
       if (
         db.orders.some(
           (o) =>
@@ -546,6 +605,44 @@
         quantity: Number(body.total_qty),
         updated_at: nowUTCString(),
       });
+      saveDB(db);
+      return makeJsonRes({ success: true });
+    }
+
+    if (path === "/api/po/check" && method === "GET") {
+      const prefixUp = (u.searchParams.get("prefix") || "").trim().toUpperCase();
+      return makeJsonRes({ lots: prefixUp ? mockLotsByPrefix(db, prefixUp) : [] });
+    }
+
+    if (path.startsWith("/api/po/") && (method === "PUT" || method === "DELETE")) {
+      const lot = decodeURIComponent(path.replace("/api/po/", "")).toUpperCase();
+      const ord = db.orders.find((o) => o.po_number.toUpperCase() === lot);
+      if (!ord) return makeJsonRes({ error: `Không tìm thấy LOT ${lot}!` }, 404);
+      const invRows = db.inventory.filter(
+        (i) => i.lot_number.toUpperCase() === lot && i.quantity > 0,
+      );
+      const moved = db.history.some(
+        (h) => String(h.po_id || "").toUpperCase() === lot && h.type !== "ADJUST",
+      );
+      const untouched =
+        invRows.length === 1 &&
+        invRows[0].quantity === Number(ord.total_qty) &&
+        !invRows[0].stage_id.toUpperCase().endsWith("_NG") &&
+        !moved;
+      if (method === "DELETE") {
+        if (!untouched) return makeJsonRes({ error: `LOT ${lot} đã chuyển công đoạn, không thể xóa!` }, 400);
+        db.inventory = db.inventory.filter((i) => i.lot_number.toUpperCase() !== lot);
+        db.orders = db.orders.filter((o) => o !== ord);
+        saveDB(db);
+        return makeJsonRes({ success: true });
+      }
+      if (body.production_date) ord.month = body.production_date;
+      const newQty = parseInt(body.total_qty);
+      if (Number.isInteger(newQty) && newQty !== Number(ord.total_qty)) {
+        if (!untouched) return makeJsonRes({ error: `LOT ${lot} đã chuyển công đoạn, không thể đổi Tổng SL!` }, 400);
+        invRows[0].quantity = newQty;
+        ord.total_qty = newQty;
+      }
       saveDB(db);
       return makeJsonRes({ success: true });
     }
@@ -833,7 +930,7 @@
         <strong>🧪 CHẾ ĐỘ TEST (MOCK DATA):</strong> Không ảnh hưởng dữ liệu D1 thật.
         <span style="margin-left:6px;">Chuyển nhanh tài khoản:</span>
         <button type="button" onclick="mockQuickLogin('NPC')" style="padding:2px 7px; border-radius:4px; border:1px solid #ca8a04; background:#fff; cursor:pointer; font-weight:bold;">Admin (NPC)</button>
-        <button type="button" onclick="mockQuickLogin('LD_BARRY')" style="padding:2px 7px; border-radius:4px; border:1px solid #ca8a04; background:#fff; cursor:pointer;">Leader BARRY</button>
+        <button type="button" onclick="mockQuickLogin('LD_BARRY')" style="padding:2px 7px; border-radius:4px; border:1px solid #ca8a04; background:#fff; cursor:pointer;">Leader BARI</button>
         <button type="button" onclick="mockQuickLogin('LD_NC')" style="padding:2px 7px; border-radius:4px; border:1px solid #ca8a04; background:#fff; cursor:pointer;">Leader NC</button>
         <button type="button" onclick="mockQuickLogin('LD_ASSY')" style="padding:2px 7px; border-radius:4px; border:1px solid #ca8a04; background:#fff; cursor:pointer;">Leader ASSY</button>
       </div>
