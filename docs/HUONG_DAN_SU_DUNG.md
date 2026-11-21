@@ -6,10 +6,10 @@ Cập nhật: 21-11-2026. File này tổng hợp lại toàn bộ những gì đ
 
 ## 1. Hiện trạng: điều quan trọng nhất cần biết trước
 
-### 1.1 Mọi thay đổi đều CHƯA commit
-Từ commit cuối (19-11) tới nay đã sửa khoảng **3.000 dòng** ở 13 file. Tất cả còn nằm ở dạng chưa commit. Nếu lỡ tay xóa hay sửa hỏng thì không quay lại được.
+### 1.1 Mốc an toàn đã commit
+Toàn bộ thay đổi từ 19-11 tới nay đã được commit (21-11-2026, commit `af8d373` "Mốc an toàn…") và đẩy lên GitHub. Nếu sau này sửa hỏng, có thể quay về mốc này.
 
-**Việc nên làm ngay:** commit một lần làm "mốc an toàn" trước khi sửa thêm bất cứ gì. Sau đó mỗi lần sửa chỉ làm 1 việc, thử xong rồi commit.
+**Từ đây:** mỗi lần sửa chỉ làm 1 việc, thử xong rồi commit. Trong VS Code nhớ bấm **+** cạnh "Changes" để stage hết trước khi Commit.
 
 ### 1.2 Front-end mới và worker mới phải đi cùng nhau
 Worker trong commit cũ **chưa có đăng nhập bằng token, chưa băm mật khẩu**. Front-end mới thì gửi token trong mọi lệnh gọi API.
