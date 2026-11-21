@@ -10,7 +10,122 @@ let historyLogCache = [];
 let adminPollingInterval = null;
 let leaderPollingInterval = null;
 let tempUserForPassChange = null;
+let pendingOldPassword = "";
+
+// Escape ký tự đặc biệt trước khi chèn dữ liệu động vào HTML (chống XSS).
+// Dùng được cả trong nội dung thẻ lẫn trong giá trị thuộc tính "...".
+function esc(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// Thông báo nổi (toast) thay cho alert(): không chặn thao tác, tự tắt sau vài giây, bấm để tắt ngay.
+// Loại thông báo được đoán từ nội dung: thành công (xanh), lỗi (đỏ), còn lại là nhắc nhở (vàng).
+function notify(message) {
+  const text = String(message ?? "");
+  let type = "warn";
+  if (/thành công|^Đã |hoàn tất|hoàn thành/i.test(text)) type = "success";
+  else if (/lỗi|thất bại|không thể|không được|không đủ|sai|vượt|hết hạn|từ chối|không có quyền/i.test(text))
+    type = "error";
+
+  let box = document.getElementById("toast-container");
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "toast-container";
+    box.setAttribute("aria-live", "polite");
+    document.body.appendChild(box);
+  }
+  const toast = document.createElement("div");
+  toast.className = `toast toast-${type}`;
+  toast.setAttribute("role", type === "error" ? "alert" : "status");
+  toast.textContent = text;
+  const close = () => toast.remove();
+  toast.addEventListener("click", close);
+  box.appendChild(toast);
+  while (box.children.length > 4) box.firstChild.remove();
+  setTimeout(close, type === "error" ? 7000 : 4000);
+}
+
+// Hộp xác nhận thay cho confirm(): trả về Promise<true|false>. Bấm Esc hoặc ra ngoài = Hủy.
+// Dùng: if (!(await confirmDialog("Nội dung...", { okText: "Xóa", danger: true }))) return;
+function confirmDialog(message, { okText = "Xác nhận", cancelText = "Hủy", danger = false } = {}) {
+  return new Promise((resolve) => {
+    const previouslyFocused = document.activeElement;
+    const overlay = document.createElement("div");
+    overlay.className = "confirm-overlay";
+    const box = document.createElement("div");
+    box.className = "confirm-box";
+    box.setAttribute("role", "alertdialog");
+    box.setAttribute("aria-modal", "true");
+    const text = document.createElement("div");
+    text.className = "confirm-text";
+    text.id = "confirm-text-" + Date.now();
+    text.textContent = String(message ?? "");
+    box.setAttribute("aria-describedby", text.id);
+    const actions = document.createElement("div");
+    actions.className = "confirm-actions";
+    const btnCancel = document.createElement("button");
+    btnCancel.type = "button";
+    btnCancel.className = "btn btn-secondary";
+    btnCancel.textContent = cancelText;
+    const btnOk = document.createElement("button");
+    btnOk.type = "button";
+    btnOk.className = "btn " + (danger ? "btn-danger-solid" : "btn-primary");
+    btnOk.textContent = okText;
+    actions.append(btnCancel, btnOk);
+    box.append(text, actions);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    const finish = (result) => {
+      document.removeEventListener("keydown", onKey, true);
+      overlay.remove();
+      if (previouslyFocused && previouslyFocused.focus) previouslyFocused.focus();
+      resolve(result);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        finish(false);
+      } else if (e.key === "Tab") {
+        // giữ focus trong hộp thoại
+        e.preventDefault();
+        (document.activeElement === btnOk ? btnCancel : btnOk).focus();
+      }
+    };
+    document.addEventListener("keydown", onKey, true);
+    btnCancel.addEventListener("click", () => finish(false));
+    btnOk.addEventListener("click", () => finish(true));
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) finish(false);
+    });
+    (danger ? btnCancel : btnOk).focus();
+  });
+}
+
+// Gọi API có kèm token đăng nhập. Hết hạn (401) thì tự đăng xuất.
+async function apiFetch(url, options = {}) {
+  const headers = { ...(options.headers || {}) };
+  if (currentUser && currentUser.token) {
+    headers.Authorization = `Bearer ${currentUser.token}`;
+  }
+  const res = await fetch(url, { ...options, headers });
+  if (res.status === 401 && currentUser) {
+    notify("Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại!");
+    window.logout();
+  }
+  return res;
+}
 let lastPendingDataString = "";
+// Admin đang xem màn hình Leader của line nào (null = không xem). Chế độ chỉ xem.
+let adminViewLine = null;
+function effectiveLine() {
+  return adminViewLine || (currentUser && currentUser.line_id) || "";
+}
 
 // Xóa toàn bộ bộ nhớ đệm tạm (localStorage cache cũ) để luôn lấy dữ liệu chuẩn 100% từ D1
 [
@@ -64,7 +179,13 @@ window.addEventListener("DOMContentLoaded", () => {
   if (savedUser) {
     try {
       currentUser = JSON.parse(savedUser);
-      navigateToRoleScreen();
+      if (!currentUser || !currentUser.token) {
+        // Phiên cũ (trước khi có token) -> bắt đăng nhập lại
+        currentUser = null;
+        localStorage.removeItem("ems_user");
+      } else {
+        navigateToRoleScreen();
+      }
     } catch (e) {
       localStorage.removeItem("ems_user");
     }
@@ -101,8 +222,9 @@ document
         return;
       }
 
-      if (data.user.password_hash === "000") {
+      if (data.user.must_change_password) {
         tempUserForPassChange = data.user;
+        pendingOldPassword = passwordInput; // chỉ giữ trong bộ nhớ, dùng để xác nhận khi đổi mật khẩu
         document.getElementById("change-pass-modal").classList.remove("hidden");
         return;
       }
@@ -118,33 +240,47 @@ document
 
 window.submitNewPassword = async function () {
   const newPass = document.getElementById("new-password").value;
-  if (newPass.length < 4) return alert("Mật khẩu phải từ 4 ký tự trở lên!");
+  const confirmPass = document.getElementById("new-password-confirm").value;
+  if (newPass.length < 4) return notify("Mật khẩu phải từ 4 ký tự trở lên!");
+  if (newPass !== confirmPass) return notify("Hai mật khẩu nhập vào không khớp!");
   try {
     const res = await fetch(`${API_BASE_URL}/api/change-password`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${tempUserForPassChange.token}`,
+      },
       body: JSON.stringify({
-        username: tempUserForPassChange.username,
+        old_password: pendingOldPassword,
         new_password: newPass,
       }),
     });
+    const data = await res.json().catch(() => ({}));
     if (res.ok) {
-      alert("Đổi mật khẩu thành công! Chào mừng bạn.");
+      notify("Đổi mật khẩu thành công! Chào mừng bạn.");
       document.getElementById("change-pass-modal").classList.add("hidden");
-      tempUserForPassChange.password_hash = newPass;
+      document.getElementById("new-password").value = "";
+      document.getElementById("new-password-confirm").value = "";
+      tempUserForPassChange.token = data.token; // token mới, đã được phép dùng API
+      tempUserForPassChange.must_change_password = false;
+      pendingOldPassword = "";
       currentUser = tempUserForPassChange;
+      tempUserForPassChange = null;
       localStorage.setItem("ems_user", JSON.stringify(currentUser));
       navigateToRoleScreen();
     } else {
-      alert("Đã xảy ra lỗi khi lưu mật khẩu.");
+      notify(data.error || "Đã xảy ra lỗi khi lưu mật khẩu.");
     }
   } catch (e) {
-    alert("Lỗi máy chủ khi đổi mật khẩu.");
+    notify("Lỗi máy chủ khi đổi mật khẩu.");
   }
 };
 
 window.logout = function () {
   currentUser = null;
+  adminViewLine = null;
+  closeAdminMenu();
+  document.getElementById("leader-screen")?.classList.remove("admin-view");
   localStorage.removeItem("ems_user");
   if (adminPollingInterval) clearInterval(adminPollingInterval);
   if (leaderPollingInterval) clearInterval(leaderPollingInterval);
@@ -192,17 +328,7 @@ function navigateToRoleScreen() {
     document.getElementById("leader-name").textContent = displayName;
 
     loadNGDropdownsThorough().then(() => {
-      const myStages = globalStages.filter(
-        (s) => s.line_id === currentUser.line_id,
-      );
-      if (myStages.length > 0) {
-        document.getElementById("leader-line").textContent = myStages
-          .map((s) => s.stage_name)
-          .join(", ");
-      } else {
-        document.getElementById("leader-line").textContent =
-          currentUser.line_id;
-      }
+      fillLeaderLineLabel(currentUser.line_id);
       switchTab("leader", "tab-wip");
       fetchPendingPOs();
     });
@@ -215,7 +341,116 @@ function navigateToRoleScreen() {
   }
 }
 
+function fillLeaderLineLabel(lineId) {
+  const myStages = globalStages.filter((s) => s.line_id === lineId);
+  document.getElementById("leader-line").textContent =
+    myStages.length > 0 ? myStages.map((s) => s.stage_name).join(", ") : lineId;
+}
+
+// Danh sách line cho ô "Xem màn hình Line" ở dashboard Admin (theo thứ tự công đoạn)
+function fillLineViewSelect() {
+  const sel = document.getElementById("line-view-select");
+  if (!sel) return;
+  const lines = [
+    ...new Set(globalStages.map((s) => String(s.line_id || "")).filter(Boolean)),
+  ];
+  sel.innerHTML =
+    '<option value="">👁 Xem màn hình Line…</option>' +
+    lines.map((l) => `<option value="${esc(l)}">Line ${esc(l)}</option>`).join("");
+}
+
+// Admin mở màn hình Leader của một line (chỉ xem)
+window.openLineView = function (lineId) {
+  if (!lineId || !currentUser || currentUser.role !== "ADMIN") return;
+  adminViewLine = lineId;
+  if (adminPollingInterval) clearInterval(adminPollingInterval);
+  if (leaderPollingInterval) clearInterval(leaderPollingInterval);
+
+  document.getElementById("admin-screen").classList.remove("active");
+  document.getElementById("admin-screen").classList.add("hidden");
+  const ls = document.getElementById("leader-screen");
+  ls.classList.remove("hidden");
+  ls.classList.add("active", "admin-view");
+
+  document.getElementById("leader-name").textContent =
+    currentUser.full_name || currentUser.username || "Admin";
+  const bannerLine = document.getElementById("admin-view-line");
+  if (bannerLine) bannerLine.textContent = lineId;
+  fillLeaderLineLabel(lineId);
+  document
+    .getElementById("btn-outsource")
+    ?.classList.toggle("hidden", lineId !== "ASSY");
+
+  leaderPOsCache = [];
+  lastPendingDataString = "";
+  const poSelect = document.getElementById("po-select");
+  if (poSelect) poSelect.innerHTML = '<option value="">-- Đang tải dữ liệu --</option>';
+  switchTab("leader", "tab-wip");
+  fetchPendingPOs();
+  leaderPollingInterval = setInterval(fetchPendingPOs, 5000);
+};
+
+window.closeLineView = function () {
+  adminViewLine = null;
+  if (leaderPollingInterval) clearInterval(leaderPollingInterval);
+  document.getElementById("leader-screen").classList.remove("admin-view");
+  document.getElementById("btn-outsource")?.classList.add("hidden");
+  leaderPOsCache = [];
+  lastPendingDataString = "";
+  navigateToRoleScreen();
+};
+
+// ===== Menu Admin dạng ngăn kéo trên điện thoại =====
+const PHONE_MQ =
+  "(max-width: 768px), (max-height: 500px) and (pointer: coarse)";
+function isPhoneLayout() {
+  return window.matchMedia && window.matchMedia(PHONE_MQ).matches;
+}
+window.openAdminMenu = function () {
+  document.querySelector("#admin-screen .sidebar")?.classList.add("open");
+  document.getElementById("admin-screen")?.classList.add("menu-open");
+};
+window.closeAdminMenu = function () {
+  document.querySelector("#admin-screen .sidebar")?.classList.remove("open");
+  document.getElementById("admin-screen")?.classList.remove("menu-open");
+};
+(function setupAdminMenuSwipe() {
+  const screen = document.getElementById("admin-screen");
+  if (!screen) return;
+  let startX = 0;
+  let startY = 0;
+  let tracking = false;
+  screen.addEventListener(
+    "touchstart",
+    (e) => {
+      if (!isPhoneLayout() || e.touches.length !== 1) return;
+      const t = e.touches[0];
+      const isOpen = screen.classList.contains("menu-open");
+      // Mở: chỉ bắt đầu từ sát mép trái. Đóng: vuốt ở đâu cũng được khi menu đang mở.
+      tracking = isOpen || t.clientX <= 24;
+      startX = t.clientX;
+      startY = t.clientY;
+    },
+    { passive: true },
+  );
+  screen.addEventListener(
+    "touchend",
+    (e) => {
+      if (!tracking) return;
+      tracking = false;
+      const t = e.changedTouches[0];
+      const dx = t.clientX - startX;
+      const dy = t.clientY - startY;
+      if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy)) return;
+      if (dx > 0) openAdminMenu();
+      else closeAdminMenu();
+    },
+    { passive: true },
+  );
+})();
+
 window.switchTab = function (role, tabId, btnElement) {
+  if (role === "admin") closeAdminMenu();
   const container =
     role === "admin"
       ? document.getElementById("admin-screen")
@@ -280,7 +515,7 @@ function getStageNameById(stageId) {
 
 async function loadNGDropdownsThorough() {
   try {
-    const stageRes = await fetch(
+    const stageRes = await apiFetch(
       `${API_BASE_URL}/api/stages?t=${Date.now()}`,
       { cache: "no-store" },
     );
@@ -297,9 +532,10 @@ async function loadNGDropdownsThorough() {
 
   refreshAllStageSelects();
   renderStagesTable();
+  fillLineViewSelect();
 
   try {
-    const ngRes = await fetch(`${API_BASE_URL}/api/ng/list?t=${Date.now()}`, {
+    const ngRes = await apiFetch(`${API_BASE_URL}/api/ng/list?t=${Date.now()}`, {
       cache: "no-store",
     });
     const ngData = await ngRes.json();
@@ -311,13 +547,13 @@ async function loadNGDropdownsThorough() {
           const stName = po.stage_id
             ? ` tại ${getStageNameById(po.stage_id)}`
             : "";
-          poOpts += `<option value="${po.lot_number}" data-stage="${po.stage_id || ""}" data-qty="${po.ng_qty || ""}">${po.lot_number} [${po.product_code}] - Lỗi: ${po.ng_qty}${stName}</option>`;
+          poOpts += `<option value="${esc(po.lot_number)}" data-stage="${esc(po.stage_id || "")}" data-qty="${esc(po.ng_qty || "")}">${esc(po.lot_number)} [${esc(po.product_code)}] - Lỗi: ${esc(po.ng_qty)}${esc(stName)}</option>`;
         });
       } else if (currentMatrixData && currentMatrixData.rows) {
         const ngRows = currentMatrixData.rows.filter((r) => r.total_ng > 0);
         if (ngRows.length > 0) {
           ngRows.forEach((r) => {
-            poOpts += `<option value="${r.po_number}">${r.po_number} [${r.product_code}] - Tổng NG: ${r.total_ng}</option>`;
+            poOpts += `<option value="${esc(r.po_number)}">${esc(r.po_number)} [${esc(r.product_code)}] - Tổng NG: ${esc(r.total_ng)}</option>`;
           });
         } else {
           poOpts = '<option value="">-- Hiện không có hàng NG nào --</option>';
@@ -335,7 +571,7 @@ async function loadNGDropdownsThorough() {
 function refreshAllStageSelects() {
   let stageOpts = '<option value="">-- Chọn công đoạn --</option>';
   globalStages.forEach((col) => {
-    stageOpts += `<option value="${col.id}">${col.stage_name} (${col.id})</option>`;
+    stageOpts += `<option value="${esc(col.id)}">${esc(col.stage_name)} (${esc(col.id)})</option>`;
   });
 
   if (document.getElementById("ng-current-stage"))
@@ -383,15 +619,15 @@ function renderStagesTable() {
     const bg = LINE_COLORS[stg.line_id] || "#f8fafc";
     html += `<tr>
       <td>${idx + 1}</td>
-      <td style="font-weight:bold; color:var(--navy);">${stg.id}</td>
-      <td style="text-align:left; font-weight:600;">${stg.stage_name}</td>
-      <td><span style="background:${bg}; padding:3px 10px; border-radius:4px; border:1px solid #cbd5e0; font-weight:600;">Line: ${stg.line_id || "-"}</span></td>
+      <td style="font-weight:bold; color:var(--navy);">${esc(stg.id)}</td>
+      <td style="text-align:left; font-weight:600;">${esc(stg.stage_name)}</td>
+      <td><span style="background:${bg}; padding:3px 10px; border-radius:4px; border:1px solid #cbd5e0; font-weight:600;">Line: ${esc(stg.line_id || "-")}</span></td>
       <td>
         <div class="action-btn-group">
           <button type="button" class="btn-icon" title="Lên" onclick="moveStageOrder(${idx}, -1)" ${idx === 0 ? "disabled" : ""}>▲</button>
           <button type="button" class="btn-icon" title="Xuống" onclick="moveStageOrder(${idx}, 1)" ${idx === globalStages.length - 1 ? "disabled" : ""}>▼</button>
-          <button type="button" class="btn-icon btn-icon-edit" onclick="startEditStage('${stg.id}')">Sửa</button>
-          <button type="button" class="btn-icon btn-icon-del" onclick="deleteStage('${stg.id}')">Xóa</button>
+          <button type="button" class="btn-icon btn-icon-edit" data-stage-id="${esc(stg.id)}" onclick="startEditStage(this.dataset.stageId)">Sửa</button>
+          <button type="button" class="btn-icon btn-icon-del" data-stage-id="${esc(stg.id)}" onclick="deleteStage(this.dataset.stageId)">Xóa</button>
         </div>
       </td>
     </tr>`;
@@ -415,16 +651,53 @@ window.moveStageOrder = async function (index, direction) {
     filterMatrix();
   }
 
+  await saveStageOrder();
+};
+
+// Lưu thứ tự hiện tại của globalStages lên D1.
+async function saveStageOrder() {
   try {
-    await fetch(`${API_BASE_URL}/api/stages/reorder`, {
+    await apiFetch(`${API_BASE_URL}/api/stages/reorder`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ordered_ids: globalStages.map((s) => s.id),
       }),
     });
-  } catch (e) {}
-};
+  } catch (e) {
+    console.error("Lỗi lưu thứ tự công đoạn:", e);
+  }
+}
+
+// Đưa công đoạn về ngay sau công đoạn cuối cùng cùng Line (để chung khối màu ở bảng theo dõi).
+async function placeStageInLineGroup(stageId) {
+  const idx = globalStages.findIndex(
+    (s) => s.id.toUpperCase() === String(stageId).toUpperCase(),
+  );
+  if (idx === -1) return;
+  const stg = globalStages[idx];
+  const rest = globalStages.filter((_, i) => i !== idx);
+  let lastSameLine = -1;
+  rest.forEach((s, i) => {
+    if (String(s.line_id).toUpperCase() === String(stg.line_id).toUpperCase()) {
+      lastSameLine = i;
+    }
+  });
+  if (lastSameLine === -1) return; // line mới, giữ nguyên vị trí
+  const newIdx = lastSameLine + 1;
+  // Đã nằm trong khối line rồi thì không đổi
+  const prev = globalStages[idx - 1];
+  const next = globalStages[idx + 1];
+  const sameLine = (s) =>
+    s && String(s.line_id).toUpperCase() === String(stg.line_id).toUpperCase();
+  if (sameLine(prev) || sameLine(next)) return;
+  rest.splice(newIdx, 0, stg);
+  globalStages.length = 0;
+  globalStages.push(...rest);
+  refreshAllStageSelects();
+  renderStagesTable();
+  await saveStageOrder();
+}
 
 window.startEditStage = function (stageId) {
   const stg = globalStages.find((s) => s.id === stageId);
@@ -480,10 +753,10 @@ window.deleteStage = async function (stageId) {
       `CẢNH BÁO: Công đoạn "${stg.stage_name} (${stg.id})" đang có trong lộ trình của ${usedInProducts.length} mã hàng (${usedInProducts.map((p) => p.product_code).join(", ")}).\n\n` +
       `Bạn vẫn muốn xóa công đoạn này khỏi danh mục?`;
   }
-  if (!confirm(warnMsg)) return;
+  if (!(await confirmDialog(warnMsg, { okText: "Xóa", danger: true }))) return;
 
   try {
-    const res = await fetch(
+    const res = await apiFetch(
       `${API_BASE_URL}/api/stages/${encodeURIComponent(stageId)}`,
       {
         method: "DELETE",
@@ -491,16 +764,16 @@ window.deleteStage = async function (stageId) {
     );
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      return alert("Không thể xóa: " + (data.error || "Lỗi từ máy chủ D1"));
+      return notify("Không thể xóa: " + (data.error || "Lỗi từ máy chủ D1"));
     }
     await loadNGDropdownsThorough();
     if (currentMatrixData) {
       currentMatrixData.columns = [...globalStages];
       filterMatrix();
     }
-    alert(`Đã xóa công đoạn ${stg.stage_name} (${stg.id}) trên D1.`);
+    notify(`Đã xóa công đoạn ${stg.stage_name} (${stg.id}) trên D1.`);
   } catch (e) {
-    alert("Lỗi kết nối API khi xóa công đoạn!");
+    notify("Lỗi kết nối API khi xóa công đoạn!");
   }
 };
 
@@ -521,18 +794,20 @@ if (formStageManager) {
       .toUpperCase();
 
     if (!stgId || !stgName || !stgLine) {
-      return alert("Vui lòng nhập đầy đủ Mã, Tên công đoạn và Line quản lý!");
+      return notify("Vui lòng nhập đầy đủ Mã, Tên công đoạn và Line quản lý!");
     }
+    const oldStage = globalStages.find((s) => s.id.toUpperCase() === stgId);
+    const oldLine = oldStage ? String(oldStage.line_id || "").toUpperCase() : "";
 
     try {
       let res;
       if (mode === "create") {
         if (globalStages.some((s) => s.id.toUpperCase() === stgId)) {
-          return alert(
+          return notify(
             `Mã công đoạn "${stgId}" đã tồn tại! Hãy bấm nút Sửa ở bảng bên phải nếu muốn đổi tên hoặc đổi Line.`,
           );
         }
-        res = await fetch(`${API_BASE_URL}/api/stages`, {
+        res = await apiFetch(`${API_BASE_URL}/api/stages`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -542,7 +817,7 @@ if (formStageManager) {
           }),
         });
       } else {
-        res = await fetch(
+        res = await apiFetch(
           `${API_BASE_URL}/api/stages/${encodeURIComponent(stgId)}`,
           {
             method: "PUT",
@@ -558,23 +833,27 @@ if (formStageManager) {
 
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        return alert("Lỗi lưu công đoạn: " + (data.error || "API từ chối"));
+        return notify("Lỗi lưu công đoạn: " + (data.error || "API từ chối"));
       }
 
-      alert(
+      notify(
         mode === "create"
           ? `Đã thêm công đoạn mới: ${stgName} (${stgId}) - Line: ${stgLine}`
           : `Đã cập nhật công đoạn: ${stgName} (${stgId}) ➔ Line: ${stgLine}`,
       );
       resetStageForm();
       await loadNGDropdownsThorough();
+      // Chỉ dời vị trí khi thêm mới hoặc đổi Line (không đụng thứ tự cũ khi chỉ đổi tên)
+      if (mode === "create" || oldLine !== stgLine) {
+        await placeStageInLineGroup(stgId);
+      }
       renderMasterTable(productsCache);
       if (currentMatrixData) {
         currentMatrixData.columns = [...globalStages];
         filterMatrix();
       }
     } catch (err) {
-      alert("Lỗi kết nối API khi lưu công đoạn!");
+      notify("Lỗi kết nối API khi lưu công đoạn!");
     }
   });
 }
@@ -591,7 +870,7 @@ window.addRoutingStep = function (selectedStageId = "") {
     <span class="step-label">Bước:</span>
     <select class="routing-stage-select" required style="padding: 7px 10px; flex: 1;">
       <option value="">-- Chọn công đoạn --</option>
-      ${globalStages.map((s) => `<option value="${s.id}" ${s.id === selectedStageId ? "selected" : ""}>${s.stage_name} (${s.id})</option>`).join("")}
+      ${globalStages.map((s) => `<option value="${esc(s.id)}" ${s.id === selectedStageId ? "selected" : ""}>${esc(s.stage_name)} (${esc(s.id)})</option>`).join("")}
     </select>
     <button type="button" class="btn-icon" title="Chuyển lên" onclick="moveRoutingStep(this, -1)">▲</button>
     <button type="button" class="btn-icon" title="Chuyển xuống" onclick="moveRoutingStep(this, 1)">▼</button>
@@ -642,7 +921,7 @@ if (formCreateProduct) {
     });
 
     if (routingMap.length === 0) {
-      return alert("Vui lòng thêm ít nhất 1 công đoạn vào lộ trình sản xuất!");
+      return notify("Vui lòng thêm ít nhất 1 công đoạn vào lộ trình sản xuất!");
     }
 
     const payload = {
@@ -654,7 +933,7 @@ if (formCreateProduct) {
     try {
       let response;
       if (editMode === "edit") {
-        response = await fetch(
+        response = await apiFetch(
           `${API_BASE_URL}/api/products/${encodeURIComponent(productCode)}`,
           {
             method: "PUT",
@@ -663,14 +942,14 @@ if (formCreateProduct) {
           },
         );
         if (!response.ok) {
-          response = await fetch(`${API_BASE_URL}/api/products`, {
+          response = await apiFetch(`${API_BASE_URL}/api/products`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
           });
         }
       } else {
-        response = await fetch(`${API_BASE_URL}/api/products`, {
+        response = await apiFetch(`${API_BASE_URL}/api/products`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
@@ -679,12 +958,12 @@ if (formCreateProduct) {
 
       const resData = await response.json().catch(() => ({}));
       if (!response.ok) {
-        return alert(
+        return notify(
           "Lỗi khi lưu mã hàng vào D1: " + (resData.error || "Không xác định"),
         );
       }
 
-      alert(
+      notify(
         editMode === "edit"
           ? `Đã cập nhật Mã hàng "${productCode}" trên D1 thành công!`
           : `Khởi tạo Mã hàng "${productCode}" trên D1 thành công!`,
@@ -693,7 +972,7 @@ if (formCreateProduct) {
       resetProductForm();
       await fetchProductsList();
     } catch (error) {
-      alert("Lỗi kết nối API khi lưu mã hàng!");
+      notify("Lỗi kết nối API khi lưu mã hàng!");
     }
   });
 }
@@ -765,15 +1044,16 @@ window.resetProductForm = function () {
 window.deleteProduct = async function (productCode) {
   const codeUpper = String(productCode).toUpperCase();
   if (
-    !confirm(
+    !(await confirmDialog(
       `Bạn có chắc chắn muốn XÓA mã hàng "${codeUpper}" khỏi cơ sở dữ liệu D1 không?`,
-    )
+      { okText: "Xóa", danger: true },
+    ))
   ) {
     return;
   }
 
   try {
-    const res = await fetch(
+    const res = await apiFetch(
       `${API_BASE_URL}/api/products/${encodeURIComponent(codeUpper)}`,
       {
         method: "DELETE",
@@ -781,10 +1061,10 @@ window.deleteProduct = async function (productCode) {
     );
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      return alert(
+      return notify(
         "Không thể xóa mã hàng: " +
           (data.error ||
-            "Vui lòng kiểm tra xem bạn đã Deploy bản worker.txt mới nhất lên Cloudflare chưa."),
+            "Vui lòng kiểm tra xem bạn đã Deploy bản worker/worker.js mới nhất lên Cloudflare chưa."),
       );
     }
 
@@ -793,15 +1073,126 @@ window.deleteProduct = async function (productCode) {
     }
 
     await fetchProductsList();
-    alert(`Đã xóa mã hàng "${codeUpper}" khỏi D1 thành công!`);
+    notify(`Đã xóa mã hàng "${codeUpper}" khỏi D1 thành công!`);
   } catch (e) {
-    alert("Lỗi kết nối API khi xóa mã hàng!");
+    notify("Lỗi kết nối API khi xóa mã hàng!");
   }
 };
 
+// Ô gợi ý tự làm (thay <datalist> vì datalist không bật ổn định trên điện thoại
+// và bị đóng khi bảng tự làm mới). getItems() trả về [{ value, label }].
+function setupCombo(inputId, btnId, listId, getItems, onPick) {
+  const input = document.getElementById(inputId);
+  const btn = document.getElementById(btnId);
+  const list = document.getElementById(listId);
+  if (!input || !list) return;
+  let activeIdx = -1;
+
+  const close = () => {
+    list.classList.add("hidden");
+    input.setAttribute("aria-expanded", "false");
+    activeIdx = -1;
+  };
+  const render = (showAll) => {
+    const q = showAll ? "" : input.value.trim().toUpperCase();
+    const items = getItems()
+      .filter(
+        (it) =>
+          !q ||
+          it.value.toUpperCase().includes(q) ||
+          String(it.label || "").toUpperCase().includes(q),
+      )
+      .slice(0, 80);
+    activeIdx = -1;
+    list.innerHTML = items.length
+      ? items
+          .map(
+            (it) =>
+              `<li role="option" data-value="${esc(it.value)}"><strong>${esc(it.value)}</strong>${it.label ? ` <small>${esc(it.label)}</small>` : ""}</li>`,
+          )
+          .join("")
+      : `<li class="combo-empty">Không có mã hàng phù hợp</li>`;
+    list.classList.remove("hidden");
+    input.setAttribute("aria-expanded", "true");
+  };
+  const pick = (value) => {
+    input.value = value;
+    close();
+    if (onPick) onPick(value);
+  };
+  const setActive = (idx) => {
+    const opts = list.querySelectorAll("li[data-value]");
+    if (!opts.length) return;
+    activeIdx = (idx + opts.length) % opts.length;
+    opts.forEach((o, i) => o.classList.toggle("active", i === activeIdx));
+    opts[activeIdx].scrollIntoView({ block: "nearest" });
+  };
+
+  input.addEventListener("focus", () => render(false));
+  input.addEventListener("input", () => render(false));
+  input.addEventListener("blur", () => setTimeout(close, 150));
+  input.addEventListener("keydown", (e) => {
+    const isOpen = !list.classList.contains("hidden");
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (!isOpen) render(false);
+      setActive(activeIdx + 1);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActive(activeIdx - 1);
+    } else if (e.key === "Enter" && isOpen && activeIdx >= 0) {
+      e.preventDefault();
+      const opt = list.querySelectorAll("li[data-value]")[activeIdx];
+      if (opt) pick(opt.dataset.value);
+    } else if (e.key === "Escape") {
+      close();
+    }
+  });
+  // mousedown + preventDefault để ô nhập không bị mất focus trước khi chọn
+  list.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    const li = e.target.closest("li[data-value]");
+    if (li) pick(li.dataset.value);
+  });
+  if (btn) {
+    btn.addEventListener("mousedown", (e) => e.preventDefault());
+    btn.addEventListener("click", () => {
+      if (list.classList.contains("hidden")) {
+        input.focus();
+        render(true); // bấm mũi tên: hiện tất cả
+      } else {
+        close();
+      }
+    });
+  }
+}
+
+// Danh sách mã hàng cho ô tìm ở Báo cáo: mã đang có trong bảng + mã trong danh mục
+function getMatrixProductItems() {
+  const names = {};
+  productsCache.forEach((p) => {
+    if (p.product_code) names[String(p.product_code).toUpperCase()] = p.product_name || "";
+  });
+  const codes = new Set(Object.keys(names));
+  (currentMatrixData?.rows || []).forEach((r) => {
+    if (r.product_code) codes.add(String(r.product_code).toUpperCase());
+  });
+  return [...codes]
+    .sort((a, b) => a.localeCompare(b, "vi", { numeric: true }))
+    .map((c) => ({ value: c, label: names[c] || "" }));
+}
+
+setupCombo(
+  "search-code",
+  "search-code-btn",
+  "search-code-list",
+  getMatrixProductItems,
+  () => filterMatrix(),
+);
+
 async function fetchProductsList() {
   try {
-    const response = await fetch(
+    const response = await apiFetch(
       `${API_BASE_URL}/api/products?t=${Date.now()}`,
       { cache: "no-store" },
     );
@@ -816,13 +1207,10 @@ async function fetchProductsList() {
 
 function updateProductAutocompleteLists() {
   const optionsHTML = productsCache
-    .map((p) => `<option value="${p.product_code}">${p.product_name}</option>`)
+    .map((p) => `<option value="${esc(p.product_code)}">${esc(p.product_name)}</option>`)
     .join("");
   if (document.getElementById("product-suggestions")) {
     document.getElementById("product-suggestions").innerHTML = optionsHTML;
-  }
-  if (document.getElementById("matrix-product-suggest")) {
-    document.getElementById("matrix-product-suggest").innerHTML = optionsHTML;
   }
   if (document.getElementById("master-count")) {
     document.getElementById("master-count").textContent = productsCache.length;
@@ -859,7 +1247,7 @@ function renderMasterTable(data) {
       routingText = steps
         .map((step, idx) => {
           const stName = getStageNameById(step.stage_id);
-          return `<span class="route-pill">${idx + 1}. ${stName}</span>`;
+          return `<span class="route-pill">${idx + 1}. ${esc(stName)}</span>`;
         })
         .join(` <span style="color:#94a3b8;">➔</span> `);
     } catch (e) {
@@ -867,13 +1255,13 @@ function renderMasterTable(data) {
     }
 
     html += `<tr>
-      <td style="font-weight:bold; color:var(--navy);">${p.product_code}</td>
-      <td>${p.product_name || "-"}</td>
+      <td style="font-weight:bold; color:var(--navy);">${esc(p.product_code)}</td>
+      <td>${esc(p.product_name || "-")}</td>
       <td>${routingText}</td>
       <td style="text-align:center;">
         <div class="action-btn-group">
-          <button type="button" class="btn-icon btn-icon-edit" onclick="startEditProduct('${p.product_code}')">Sửa</button>
-          <button type="button" class="btn-icon btn-icon-del" onclick="deleteProduct('${p.product_code}')">Xóa</button>
+          <button type="button" class="btn-icon btn-icon-edit" data-code="${esc(p.product_code)}" onclick="startEditProduct(this.dataset.code)">Sửa</button>
+          <button type="button" class="btn-icon btn-icon-del" data-code="${esc(p.product_code)}" onclick="deleteProduct(this.dataset.code)">Xóa</button>
         </div>
       </td>
     </tr>`;
@@ -928,7 +1316,7 @@ window.previewLotSplit = function () {
   }
 
   previewBox.classList.remove("hidden");
-  previewBox.innerHTML = `<strong>Dự kiến chẻ thành ${lots.length} LOT:</strong> ${lots.slice(0, 8).join(", ")}${lots.length > 8 ? ` ... (+${lots.length - 8} LOT)` : ""}`;
+  previewBox.innerHTML = `<strong>Dự kiến chẻ thành ${lots.length} LOT:</strong> ${esc(lots.slice(0, 8).join(", "))}${lots.length > 8 ? ` ... (+${lots.length - 8} LOT)` : ""}`;
 };
 
 const formCreatePO = document.getElementById("form-create-po");
@@ -950,7 +1338,7 @@ if (formCreatePO) {
     const splitQty = parseInt(document.getElementById("po-split").value);
 
     if (splitQty > totalQty) {
-      alert("Kích thước 1 LOT không được lớn hơn Tổng sản lượng!");
+      notify("Kích thước 1 LOT không được lớn hơn Tổng sản lượng!");
       return;
     }
 
@@ -967,14 +1355,14 @@ if (formCreatePO) {
     }
 
     const confirmMsg = `Hệ thống sẽ chẻ thành ${lots.length} LOT (${lots.map((l) => l.qty).join(", ")}).\nBạn có chắc chắn muốn cấp phát sản xuất?`;
-    if (!confirm(confirmMsg)) return;
+    if (!(await confirmDialog(confirmMsg, { okText: "Cấp phát" }))) return;
 
     let successCount = 0;
     let errorMessages = [];
 
     for (const lot of lots) {
       try {
-        const response = await fetch(`${API_BASE_URL}/api/po/create`, {
+        const response = await apiFetch(`${API_BASE_URL}/api/po/create`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -998,12 +1386,12 @@ if (formCreatePO) {
     }
 
     if (errorMessages.length > 0) {
-      alert(
+      notify(
         `Đã tạo được ${successCount}/${lots.length} LOT.\nDanh sách lỗi:\n` +
           errorMessages.join("\n"),
       );
     } else {
-      alert(
+      notify(
         `Đã cấp phát THÀNH CÔNG ${successCount}/${lots.length} LOT vào dây chuyền!`,
       );
       formCreatePO.reset();
@@ -1034,6 +1422,9 @@ window.renderPOManageTable = function () {
       (r.product_code || "").toUpperCase().includes(kw),
   );
 
+  const visibleRows = kw ? rows : rows.slice(0, MATRIX_DEFAULT_LIMIT);
+  setLimitNote(container, "po-manage-limit-note", visibleRows.length, rows.length);
+
   if (rows.length === 0) {
     container.innerHTML = `<p style="padding:14px; text-align:center;">Không có LOT nào khớp tìm kiếm.</p>`;
     return;
@@ -1053,11 +1444,11 @@ window.renderPOManageTable = function () {
     </thead>
     <tbody>`;
 
-  rows.forEach((r) => {
+  visibleRows.forEach((r) => {
     html += `<tr>
       <td>${formatDateVN(r.production_date)}</td>
-      <td style="font-weight:bold; color:var(--navy);">${r.po_number}</td>
-      <td>${r.product_code}</td>
+      <td style="font-weight:bold; color:var(--navy);">${esc(r.po_number)}</td>
+      <td>${esc(r.product_code)}</td>
       <td style="font-weight:bold;">${r.total_qty}</td>
       <td style="color:#0284c7; font-weight:600;">${r.wip_qty}</td>
       <td style="color:var(--maroon); font-weight:bold;">${r.total_ng > 0 ? r.total_ng : "-"}</td>
@@ -1069,6 +1460,46 @@ window.renderPOManageTable = function () {
   container.innerHTML = html;
 };
 
+// Gợi ý công đoạn trả về = công đoạn đứng ngay trước công đoạn lỗi trong routing của mã hàng
+function suggestReworkStage() {
+  const returnSelect = document.getElementById("ng-return-stage");
+  const lotNo = document.getElementById("ng-po-select")?.value;
+  const curStage = String(
+    document.getElementById("ng-current-stage")?.value || "",
+  ).toUpperCase();
+  if (!returnSelect || !lotNo || !curStage || returnSelect.value) return;
+  const row = currentMatrixData?.rows?.find((r) => r.po_number === lotNo);
+  const product = row
+    ? productsCache.find(
+        (p) =>
+          String(p.product_code || "").toUpperCase() ===
+          String(row.product_code || "").toUpperCase(),
+      )
+    : null;
+  if (!product) return;
+  try {
+    const steps = JSON.parse(product.routing_map || "[]");
+    const idx = steps.findIndex(
+      (st) => String(st.stage_id || "").toUpperCase() === curStage,
+    );
+    if (idx > 0) {
+      const prevId = String(steps[idx - 1].stage_id || "");
+      const opt = Array.from(returnSelect.options).find(
+        (o) => o.value.toUpperCase() === prevId.toUpperCase(),
+      );
+      if (opt) returnSelect.value = opt.value;
+    }
+  } catch (e) {
+    console.error("Lỗi đọc routing khi gợi ý REWORK:", e);
+  }
+}
+
+window.onChangeNGStage = function () {
+  const returnSelect = document.getElementById("ng-return-stage");
+  if (returnSelect) returnSelect.value = "";
+  if (document.getElementById("ng-action")?.value === "REWORK") suggestReworkStage();
+};
+
 window.toggleReworkStage = function () {
   const action = document.getElementById("ng-action")?.value;
   const groupReturn = document.getElementById("group-return-stage");
@@ -1078,6 +1509,7 @@ window.toggleReworkStage = function () {
   if (action === "REWORK") {
     groupReturn.classList.remove("hidden");
     returnSelect.setAttribute("required", "required");
+    suggestReworkStage();
   } else {
     groupReturn.classList.add("hidden");
     returnSelect.removeAttribute("required");
@@ -1103,6 +1535,12 @@ window.onSelectNGLot = function () {
         }
       }
     }
+  }
+  // Đổi LOT thì gợi ý lại công đoạn trả về
+  const returnSelect = document.getElementById("ng-return-stage");
+  if (returnSelect) returnSelect.value = "";
+  if (document.getElementById("ng-action")?.value === "REWORK") {
+    suggestReworkStage();
   }
 };
 
@@ -1169,11 +1607,11 @@ function renderNGSummaryFromMatrix() {
     <tbody>`;
 
   ngItems.forEach((item) => {
-    html += `<tr style="cursor:pointer;" onclick="prefillNGForm('${item.po_number}', '${item.stage_id}', ${item.ng_qty})">
+    html += `<tr style="cursor:pointer;" data-po="${esc(item.po_number)}" data-stage="${esc(item.stage_id)}" data-qty="${esc(item.ng_qty)}" onclick="prefillNGForm(this.dataset.po, this.dataset.stage, Number(this.dataset.qty))">
       <td>${formatDateVN(item.production_date)}</td>
-      <td style="font-weight:bold; color:var(--navy);">${item.po_number}</td>
-      <td>${item.product_code}</td>
-      <td style="font-weight:600;">${item.stage_name}</td>
+      <td style="font-weight:bold; color:var(--navy);">${esc(item.po_number)}</td>
+      <td>${esc(item.product_code)}</td>
+      <td style="font-weight:600;">${esc(item.stage_name)}</td>
       <td><span class="badge-ng">${item.ng_qty}</span></td>
       <td><button type="button" class="btn-icon btn-icon-edit">Xử lý</button></td>
     </tr>`;
@@ -1194,10 +1632,10 @@ if (formResolveNG) {
     const returnStage = document.getElementById("ng-return-stage").value;
 
     if (!lotNumber || !currentStage || ngQty <= 0) {
-      return alert("Vui lòng chọn đầy đủ LOT, Công đoạn có NG và Số lượng!");
+      return notify("Vui lòng chọn đầy đủ LOT, Công đoạn có NG và Số lượng!");
     }
     if (action === "REWORK" && !returnStage) {
-      return alert("Vui lòng chọn công đoạn trả về để làm lại (REWORK)!");
+      return notify("Vui lòng chọn công đoạn trả về để làm lại (REWORK)!");
     }
 
     const actionText =
@@ -1206,15 +1644,16 @@ if (formResolveNG) {
         : `CHUYỂN LÀM LẠI (REWORK) ${ngQty} sản phẩm về công đoạn ${getStageNameById(returnStage)}`;
 
     if (
-      !confirm(
+      !(await confirmDialog(
         `Xác nhận xử lý NG cho LOT ${lotNumber} tại ${getStageNameById(currentStage)}:\n➔ ${actionText}?`,
-      )
+        { okText: "Xử lý" },
+      ))
     ) {
       return;
     }
 
     try {
-      const res = await fetch(`${API_BASE_URL}/api/ng/resolve`, {
+      const res = await apiFetch(`${API_BASE_URL}/api/ng/resolve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1231,17 +1670,17 @@ if (formResolveNG) {
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        alert("Đã cập nhật xử lý hàng NG thành công!");
+        notify("Đã cập nhật xử lý hàng NG thành công!");
         formResolveNG.reset();
         toggleReworkStage();
         await fetchMatrixReport();
         await loadNGDropdownsThorough();
         renderNGSummaryFromMatrix();
       } else {
-        alert("Lỗi khi xử lý NG: " + (data.error || "API chưa phản hồi"));
+        notify("Lỗi khi xử lý NG: " + (data.error || "API chưa phản hồi"));
       }
     } catch (err) {
-      alert("Lỗi kết nối máy chủ API khi xử lý hàng NG!");
+      notify("Lỗi kết nối máy chủ API khi xử lý hàng NG!");
     }
   });
 }
@@ -1258,10 +1697,40 @@ function formatDateVN(dateStr) {
   return dateStr;
 }
 
+// Ngày cấp mới lên đầu; cùng ngày thì Số LOT tăng dần (PO261119-01, -02, ...)
+function compareLotRows(a, b) {
+  const da = String(a.production_date || "");
+  const db = String(b.production_date || "");
+  if (da !== db) return da < db ? 1 : -1;
+  return String(a.po_number || "").localeCompare(String(b.po_number || ""), "vi", {
+    numeric: true,
+  });
+}
+
+// Khi chưa tìm kiếm/lọc, bảng chỉ hiện bấy nhiêu LOT mới nhất
+const MATRIX_DEFAULT_LIMIT = 100;
+
+function setLimitNote(container, noteId, shown, total) {
+  let note = document.getElementById(noteId);
+  if (!note) {
+    note = document.createElement("div");
+    note.id = noteId;
+    note.className = "limit-note";
+    container.parentNode.insertBefore(note, container);
+  }
+  if (shown < total) {
+    note.textContent = `Đang hiện ${shown}/${total} LOT mới nhất. Nhập Số LOT, Mã hàng hoặc chọn ngày để xem LOT cũ hơn.`;
+    note.classList.remove("hidden");
+  } else {
+    note.textContent = "";
+    note.classList.add("hidden");
+  }
+}
+
 async function fetchMatrixReport() {
   if (!currentUser || currentUser.role !== "ADMIN") return;
   try {
-    const response = await fetch(
+    const response = await apiFetch(
       `${API_BASE_URL}/api/dashboard/matrix?t=${Date.now()}`,
       { cache: "no-store" },
     );
@@ -1311,6 +1780,7 @@ async function fetchMatrixReport() {
       };
     });
 
+    rows.sort(compareLotRows);
     currentMatrixData = { columns, rows };
     filterMatrix();
     renderPOManageTable();
@@ -1362,6 +1832,21 @@ window.clearMatrixFilters = function () {
   filterMatrix();
 };
 
+window.toggleMatrixFilters = function () {
+  const panel = document.querySelector("#tab-matrix .filter-panel");
+  if (!panel) return;
+  const on = panel.classList.toggle("show-extra");
+  document.getElementById("btn-toggle-filter")?.setAttribute("aria-pressed", on);
+};
+
+// Điện thoại: ô KPI ẩn mặc định, bấm "Số tổng" mới hiện
+window.toggleMatrixKPI = function () {
+  const tab = document.getElementById("tab-matrix");
+  if (!tab) return;
+  const on = tab.classList.toggle("show-kpi");
+  document.getElementById("btn-toggle-kpi")?.setAttribute("aria-pressed", on);
+};
+
 window.filterMatrix = function () {
   if (!currentMatrixData) return;
   const dateFrom = document.getElementById("search-date-from")?.value || "";
@@ -1404,7 +1889,16 @@ window.filterMatrix = function () {
   });
 
   renderMatrixKPIs(filteredMatrixRows);
-  renderMatrixTable(filteredMatrixRows);
+  const hasFilter =
+    !!(dateFrom || dateTo || lotVal || codeVal) || statusVal !== "ALL";
+  const visibleRows = hasFilter
+    ? filteredMatrixRows
+    : filteredMatrixRows.slice(0, MATRIX_DEFAULT_LIMIT);
+  const container = document.getElementById("matrix-table-container");
+  if (container) {
+    setLimitNote(container, "matrix-limit-note", visibleRows.length, filteredMatrixRows.length);
+  }
+  renderMatrixTable(visibleRows);
 };
 
 function renderMatrixKPIs(rows) {
@@ -1474,7 +1968,7 @@ function renderMatrixKPIs(rows) {
         activeNgStages
           .map(
             (st) =>
-              `<span class="ng-stage-chip">${st.name}: <strong>${st.ng}</strong></span>`,
+              `<span class="ng-stage-chip">${esc(st.name)}: <strong>${st.ng}</strong></span>`,
           )
           .join(" ");
     } else {
@@ -1484,26 +1978,38 @@ function renderMatrixKPIs(rows) {
   }
 }
 
+// Chỉ giữ công đoạn có số liệu (OK hoặc NG) trong các dòng đang hiển thị.
+function getActiveColumns(rows) {
+  if (!currentMatrixData) return [];
+  return currentMatrixData.columns.filter((c) =>
+    rows.some((r) => {
+      const st = r.stages[c.id];
+      return st && (st.good > 0 || st.ng > 0);
+    }),
+  );
+}
+
 function renderMatrixTable(rows) {
   const container = document.getElementById("matrix-table-container");
   if (!currentMatrixData || !container) return;
+  const activeCols = getActiveColumns(rows);
 
   let tableHTML = `<table class="matrix-table" id="export-table"><thead><tr>`;
-  tableHTML += `<th rowspan="2" style="vertical-align: middle;">Ngày Cấp</th>`;
-  tableHTML += `<th rowspan="2" style="vertical-align: middle;">Số LOT</th>`;
+  tableHTML += `<th rowspan="2" class="col-hide-phone" style="vertical-align: middle;">Ngày Cấp</th>`;
+  tableHTML += `<th rowspan="2" class="col-lot" style="vertical-align: middle;">Số LOT</th>`;
   tableHTML += `<th rowspan="2" style="vertical-align: middle;">Mã Hàng</th>`;
-  tableHTML += `<th rowspan="2" style="vertical-align: middle;">Tổng SL</th>`;
+  tableHTML += `<th rowspan="2" class="col-hide-phone" style="vertical-align: middle;">Tổng SL</th>`;
 
-  currentMatrixData.columns.forEach((col) => {
+  activeCols.forEach((col) => {
     const bg = LINE_COLORS[col.line_id] || "#edf2f7";
-    tableHTML += `<th colspan="2" style="background-color: ${bg}; border-bottom:1px solid #ccc; text-align:center;">${col.stage_name}</th>`;
+    tableHTML += `<th colspan="2" style="background-color: ${bg}; border-bottom:1px solid #ccc; text-align:center;">${esc(col.stage_name)}</th>`;
   });
 
   tableHTML += `<th rowspan="2" style="vertical-align: middle; background:#fff1f2; color:var(--maroon);">TỔNG NG</th>`;
   tableHTML += `<th rowspan="2" style="vertical-align: middle; background:#ecfdf5; color:var(--green);">KHO (OK)</th>`;
   tableHTML += `</tr><tr>`;
 
-  currentMatrixData.columns.forEach((col) => {
+  activeCols.forEach((col) => {
     const bg = LINE_COLORS[col.line_id] || "#edf2f7";
     tableHTML += `<th style="background-color: ${bg}; color: #22835a; font-size:11px;">OK</th>`;
     tableHTML += `<th style="background-color: ${bg}; color: #a52e3b; font-size:11px; border-right: 2px solid rgba(0,0,0,0.08);">NG</th>`;
@@ -1511,14 +2017,14 @@ function renderMatrixTable(rows) {
   tableHTML += `</tr></thead><tbody>`;
 
   if (rows.length === 0) {
-    tableHTML += `<tr><td colspan="${currentMatrixData.columns.length * 2 + 6}" style="text-align: center; padding: 24px;">Không tìm thấy dữ liệu phù hợp với bộ lọc.</td></tr>`;
+    tableHTML += `<tr><td colspan="${activeCols.length * 2 + 6}" style="text-align: center; padding: 24px;">Không tìm thấy dữ liệu phù hợp với bộ lọc.</td></tr>`;
   }
 
   let sumTotal = 0;
   let sumAllNG = 0;
   let sumKho = 0;
   const colSums = {};
-  currentMatrixData.columns.forEach((c) => {
+  activeCols.forEach((c) => {
     colSums[c.id] = { good: 0, ng: 0 };
   });
 
@@ -1528,12 +2034,12 @@ function renderMatrixTable(rows) {
     sumKho += row.finished_qty;
 
     tableHTML += `<tr>
-      <td>${formatDateVN(row.production_date)}</td>
-      <td style="font-weight:bold; color:var(--navy);">${row.po_number}</td>
-      <td style="font-weight:600;">${row.product_code}</td>
-      <td style="font-weight:bold;">${row.total_qty}</td>`;
+      <td class="col-hide-phone">${formatDateVN(row.production_date)}</td>
+      <td class="col-lot" style="font-weight:bold; color:var(--navy);">${esc(row.po_number)}</td>
+      <td style="font-weight:600;">${esc(row.product_code)}</td>
+      <td class="col-hide-phone" style="font-weight:bold;">${row.total_qty}</td>`;
 
-    currentMatrixData.columns.forEach((col) => {
+    activeCols.forEach((col) => {
       const stg = row.stages[col.id];
       const bg = LINE_COLORS[col.line_id] || "transparent";
       let timeStr = "Chưa thao tác";
@@ -1560,12 +2066,12 @@ function renderMatrixTable(rows) {
 
       tableHTML +=
         goodVal > 0
-          ? `<td class="has-tooltip" data-time="${timeStr}" style="background-color: ${bg}; text-align:center;"><span class="badge-good">${goodVal}</span></td>`
+          ? `<td class="has-tooltip" data-time="${esc(timeStr)}" style="background-color: ${bg}; text-align:center;"><span class="badge-good">${goodVal}</span></td>`
           : `<td style="background-color: ${bg}; text-align:center;"><span class="cell-empty">-</span></td>`;
 
       tableHTML +=
         ngVal > 0
-          ? `<td class="has-tooltip" data-time="Phát sinh ${ngVal} NG tại ${col.stage_name}" style="background-color: ${bg}; text-align:center; border-right: 2px solid rgba(0,0,0,0.08);"><span class="badge-ng">${ngVal}</span></td>`
+          ? `<td class="has-tooltip" data-time="Phát sinh ${ngVal} NG tại ${esc(col.stage_name)}" style="background-color: ${bg}; text-align:center; border-right: 2px solid rgba(0,0,0,0.08);"><span class="badge-ng">${ngVal}</span></td>`
           : `<td style="background-color: ${bg}; text-align:center; border-right: 2px solid rgba(0,0,0,0.08);"><span class="cell-empty">-</span></td>`;
     });
 
@@ -1574,7 +2080,7 @@ function renderMatrixTable(rows) {
         row.total_qty > 0
           ? ((row.total_ng / row.total_qty) * 100).toFixed(1)
           : 0;
-      tableHTML += `<td class="has-tooltip" data-time="${row.ng_breakdown || "Tổng NG"} (${ngRateLot}%)" style="background:#fff1f2; font-weight:bold; color:var(--maroon);">
+      tableHTML += `<td class="has-tooltip" data-time="${esc(row.ng_breakdown || "Tổng NG")} (${ngRateLot}%)" style="background:#fff1f2; font-weight:bold; color:var(--maroon);">
         <span class="badge-ng" style="font-size:12px;">${row.total_ng}</span>
       </td>`;
     } else {
@@ -1591,7 +2097,7 @@ function renderMatrixTable(rows) {
       <td colspan="3" style="text-align:right; font-weight:bold;">TỔNG CỘNG (${rows.length} LOT):</td>
       <td style="font-weight:bold;">${sumTotal}</td>`;
 
-    currentMatrixData.columns.forEach((col) => {
+    activeCols.forEach((col) => {
       const s = colSums[col.id];
       tableHTML += `<td style="font-weight:bold; color:#22835a;">${s.good > 0 ? s.good : 0}</td>`;
       tableHTML += `<td style="font-weight:bold; color:#a52e3b; border-right: 2px solid rgba(0,0,0,0.08);">${s.ng > 0 ? s.ng : 0}</td>`;
@@ -1608,7 +2114,7 @@ function renderMatrixTable(rows) {
 
 window.exportMatrixExcel = function () {
   if (!currentMatrixData || !filteredMatrixRows) {
-    return alert("Chưa có dữ liệu báo cáo để xuất!");
+    return notify("Chưa có dữ liệu báo cáo để xuất!");
   }
 
   const dateFrom =
@@ -1616,7 +2122,7 @@ window.exportMatrixExcel = function () {
   const dateTo = document.getElementById("search-date-to")?.value || "Tất cả";
   const codeFilter = document.getElementById("search-code")?.value || "Tất cả";
   const lotFilter = document.getElementById("search-lot")?.value || "Tất cả";
-  const cols = currentMatrixData.columns;
+  const cols = getActiveColumns(filteredMatrixRows);
   const totalTableCols = cols.length * 2 + 6;
 
   let sumTotal = 0;
@@ -1657,7 +2163,7 @@ window.exportMatrixExcel = function () {
           <th rowspan="2" class="th-main">Tổng SL</th>`;
 
   cols.forEach((col) => {
-    html += `<th colspan="2" class="th-main">${col.stage_name}</th>`;
+    html += `<th colspan="2" class="th-main">${esc(col.stage_name)}</th>`;
   });
 
   html += `<th rowspan="2" class="th-ng">TỔNG NG</th>
@@ -1678,8 +2184,8 @@ window.exportMatrixExcel = function () {
 
     html += `<tr>
       <td>${formatDateVN(row.production_date)}</td>
-      <td style="font-weight:bold;">${row.po_number}</td>
-      <td>${row.product_code}</td>
+      <td style="font-weight:bold;">${esc(row.po_number)}</td>
+      <td>${esc(row.product_code)}</td>
       <td style="font-weight:bold;">${row.total_qty}</td>`;
 
     cols.forEach((col) => {
@@ -1724,9 +2230,9 @@ window.exportMatrixExcel = function () {
 
 window.exportMatrixCSV = function () {
   if (!currentMatrixData || !filteredMatrixRows) {
-    return alert("Chưa có dữ liệu để xuất CSV!");
+    return notify("Chưa có dữ liệu để xuất CSV!");
   }
-  const cols = currentMatrixData.columns;
+  const cols = getActiveColumns(filteredMatrixRows);
   const headers = ["Ngày Cấp", "Số LOT", "Mã Hàng", "Tổng SL"];
   cols.forEach((c) => {
     headers.push(`${c.stage_name} (OK)`);
@@ -1769,7 +2275,7 @@ let filteredAdminHistory = [];
 
 async function fetchHistoryLog() {
   try {
-    const res = await fetch(`${API_BASE_URL}/api/history?t=${Date.now()}`, {
+    const res = await apiFetch(`${API_BASE_URL}/api/history?t=${Date.now()}`, {
       cache: "no-store",
     });
     const result = await res.json();
@@ -1788,7 +2294,7 @@ async function fetchHistoryLog() {
 function populateHistoryFilters() {
   let stageOpts = '<option value="">-- Mọi công đoạn --</option>';
   globalStages.forEach((st) => {
-    stageOpts += `<option value="${st.id}">${st.stage_name}</option>`;
+    stageOpts += `<option value="${esc(st.id)}">${esc(st.stage_name)}</option>`;
   });
   if (document.getElementById("hist-stage"))
     document.getElementById("hist-stage").innerHTML = stageOpts;
@@ -1803,7 +2309,7 @@ function populateHistoryFilters() {
   ].filter(Boolean);
 
   const suggestHTML = uniqueKeywords
-    .map((k) => `<option value="${k}">`)
+    .map((k) => `<option value="${esc(k)}">`)
     .join("");
   if (document.getElementById("hist-suggest"))
     document.getElementById("hist-suggest").innerHTML = suggestHTML;
@@ -1858,7 +2364,19 @@ window.filterHistoryLog = function (role) {
       matchKw = po.includes(keyword) || prd.includes(keyword);
     }
 
-    return matchDate && matchStage && matchType && matchKw;
+    // Admin xem màn hình Leader: chỉ giữ giao dịch thuộc công đoạn của line đang xem
+    let matchLine = true;
+    if (isLd && adminViewLine) {
+      const lineStages = globalStages
+        .filter((s) => s.line_id === adminViewLine)
+        .map((s) => String(s.id).toUpperCase());
+      const base = (st) => String(st || "").toUpperCase().replace(/_NG$/, "");
+      matchLine =
+        lineStages.includes(base(log.from_stage)) ||
+        lineStages.includes(base(log.to_stage));
+    }
+
+    return matchDate && matchStage && matchType && matchKw && matchLine;
   });
 
   if (!isLd) {
@@ -1904,14 +2422,14 @@ function renderHistoryTable(data, tbodyId) {
           : log.username || "Hệ thống";
 
         return `<tr>
-          <td>${timeStr}</td>
-          <td>${nameStr}</td>
-          <td style="color:var(--navy); font-weight:bold;">${log.product_code || "-"}</td>
-          <td style="font-weight:bold;">${log.po_id || "-"}</td>
-          <td style="${typeStyle}">${log.type || "-"}</td>
-          <td style="font-weight:bold;">${log.qty || 0}</td>
-          <td>${getStageNameById(log.from_stage)}</td>
-          <td>${getStageNameById(log.to_stage)}</td>
+          <td>${esc(timeStr)}</td>
+          <td>${esc(nameStr)}</td>
+          <td style="color:var(--navy); font-weight:bold;">${esc(log.product_code || "-")}</td>
+          <td style="font-weight:bold;">${esc(log.po_id || "-")}</td>
+          <td style="${typeStyle}">${esc(log.type || "-")}</td>
+          <td style="font-weight:bold;">${esc(log.qty || 0)}</td>
+          <td>${esc(getStageNameById(log.from_stage))}</td>
+          <td>${esc(getStageNameById(log.to_stage))}</td>
         </tr>`;
       })
       .join("");
@@ -1922,7 +2440,7 @@ function renderHistoryTable(data, tbodyId) {
 
 window.exportHistoryExcel = function () {
   if (!filteredAdminHistory || filteredAdminHistory.length === 0) {
-    return alert("Không có dữ liệu lịch sử để xuất!");
+    return notify("Không có dữ liệu lịch sử để xuất!");
   }
   let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
   <head><meta charset="UTF-8"><style>
@@ -1961,14 +2479,14 @@ window.exportHistoryExcel = function () {
       ? `${log.full_name} (${log.username})`
       : log.username || "Hệ thống";
     html += `<tr>
-      <td>${timeStr}</td>
-      <td>${nameStr}</td>
-      <td>${log.product_code || "-"}</td>
-      <td>${log.po_id || "-"}</td>
-      <td>${log.type || "-"}</td>
-      <td>${log.qty || 0}</td>
-      <td>${getStageNameById(log.from_stage)}</td>
-      <td>${getStageNameById(log.to_stage)}</td>
+      <td>${esc(timeStr)}</td>
+      <td>${esc(nameStr)}</td>
+      <td>${esc(log.product_code || "-")}</td>
+      <td>${esc(log.po_id || "-")}</td>
+      <td>${esc(log.type || "-")}</td>
+      <td>${esc(log.qty || 0)}</td>
+      <td>${esc(getStageNameById(log.from_stage))}</td>
+      <td>${esc(getStageNameById(log.to_stage))}</td>
     </tr>`;
   });
 
@@ -1986,10 +2504,10 @@ window.exportHistoryExcel = function () {
 // 7. LEADER: TẢI HÀNG CHỜ & KÉO ĐẨY NHANH
 // ==========================================
 async function fetchPendingPOs() {
-  if (!currentUser || currentUser.role !== "LEADER") return;
+  if (!currentUser || (currentUser.role !== "LEADER" && !adminViewLine)) return;
   try {
-    const response = await fetch(
-      `${API_BASE_URL}/api/leader/pending?line_id=${currentUser.line_id}&t=${Date.now()}`,
+    const response = await apiFetch(
+      `${API_BASE_URL}/api/leader/pending?line_id=${encodeURIComponent(effectiveLine())}&t=${Date.now()}`,
       { cache: "no-store" },
     );
     const result = await response.json();
@@ -1998,7 +2516,19 @@ async function fetchPendingPOs() {
     if (newDataString === lastPendingDataString) return;
 
     lastPendingDataString = newDataString;
-    leaderPOsCache = result.data || [];
+    // Sắp LOT từ nhỏ tới lớn (PO261118-01, -02, ... -10), cùng LOT thì theo thứ tự công đoạn
+    const stageOrder = (id) => {
+      const i = globalStages.findIndex(
+        (s) => s.id.toUpperCase() === String(id || "").toUpperCase(),
+      );
+      return i === -1 ? 9999 : i;
+    };
+    leaderPOsCache = (result.data || []).slice().sort(
+      (a, b) =>
+        String(a.po_number || "").localeCompare(String(b.po_number || ""), "vi", {
+          numeric: true,
+        }) || stageOrder(a.from_stage) - stageOrder(b.from_stage),
+    );
     populateLeaderSearchDropdowns();
   } catch (error) {}
 }
@@ -2012,10 +2542,12 @@ window.populateLeaderSearchDropdowns = function () {
 
   const uniqueProducts = [
     ...new Set(leaderPOsCache.map((po) => po.product_code)),
-  ].filter(Boolean);
+  ]
+    .filter(Boolean)
+    .sort((a, b) => String(a).localeCompare(String(b), "vi", { numeric: true }));
 
   productList.innerHTML = uniqueProducts
-    .map((p) => `<option value="${p}">`)
+    .map((p) => `<option value="${esc(p)}">`)
     .join("");
 
   updateLeaderLotOptions();
@@ -2039,7 +2571,7 @@ window.updateLeaderLotOptions = function () {
     ...new Set(availableLots.map((po) => po.po_number)),
   ].filter(Boolean);
 
-  lotList.innerHTML = uniqueLots.map((l) => `<option value="${l}">`).join("");
+  lotList.innerHTML = uniqueLots.map((l) => `<option value="${esc(l)}">`).join("");
 
   filterLeaderPOs();
 };
@@ -2111,11 +2643,11 @@ function renderLeaderPOs(data) {
       card.onclick = () => quickSelectLeaderPO(optionValue);
       card.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-          <h3 style="color: var(--navy); margin:0;">${po.po_number} <span style="font-size: 13px; color: var(--gray-dark);">(${po.product_code})</span></h3>
+          <h3 style="color: var(--navy); margin:0;">${esc(po.po_number)} <span style="font-size: 13px; color: var(--gray-dark);">(${esc(po.product_code)})</span></h3>
           <span class="btn-chip" style="background:#eaf1f8; color:var(--navy);">Chạm để giao ➔</span>
         </div>
-        <p style="margin-bottom: 4px;">📦 Tồn tại trạm: <strong class="text-primary" style="font-size: 17px;">${po.qty_available}</strong></p>
-        <p style="font-size: 13px;">📍 Hiện tại: <strong style="color: var(--maroon);">${currentStageName}</strong> ➔ Tiếp theo: <strong>${toStageName}</strong></p>
+        <p style="margin-bottom: 4px;">📦 Tồn tại trạm: <strong class="text-primary" style="font-size: 17px;">${esc(po.qty_available)}</strong></p>
+        <p style="font-size: 13px;">📍 Hiện tại: <strong style="color: var(--maroon);">${esc(currentStageName)}</strong> ➔ Tiếp theo: <strong>${esc(toStageName)}</strong></p>
       `;
       wipContainer.appendChild(card);
     });
@@ -2159,7 +2691,7 @@ window.onLeaderSelectPO = function () {
   try {
     const data = JSON.parse(selectEl.value);
     infoBox.classList.remove("hidden");
-    infoBox.innerHTML = `Lô <strong>${data.po_number || data.po_id}</strong> [${data.product_code || ""}] | Tồn tối đa có thể giao: <strong style="color:var(--maroon); font-size:15px;">${data.max_qty}</strong>`;
+    infoBox.innerHTML = `Lô <strong>${esc(data.po_number || data.po_id)}</strong> [${esc(data.product_code || "")}] | Tồn tối đa có thể giao: <strong style="color:var(--maroon); font-size:15px;">${esc(data.max_qty)}</strong>`;
     document.getElementById("qty-pass").value = data.max_qty;
     document.getElementById("qty-ng").value = 0;
   } catch (e) {
@@ -2167,9 +2699,20 @@ window.onLeaderSelectPO = function () {
   }
 };
 
+// Khi nhập số NG, tự giảm số PASS còn lại (PASS = tồn tối đa - NG). Có thể sửa tay sau đó.
+window.syncPassWithNg = function () {
+  const selectEl = document.getElementById("po-select");
+  if (!selectEl || !selectEl.value) return;
+  try {
+    const data = JSON.parse(selectEl.value);
+    const ngVal = parseInt(document.getElementById("qty-ng").value) || 0;
+    document.getElementById("qty-pass").value = Math.max(0, data.max_qty - ngVal);
+  } catch (e) {}
+};
+
 window.fillMaxPassQty = function () {
   const selectEl = document.getElementById("po-select");
-  if (!selectEl || !selectEl.value) return alert("Vui lòng chọn LOT trước!");
+  if (!selectEl || !selectEl.value) return notify("Vui lòng chọn LOT trước!");
   try {
     const data = JSON.parse(selectEl.value);
     const ngVal = parseInt(document.getElementById("qty-ng").value) || 0;
@@ -2181,10 +2724,13 @@ window.fillMaxPassQty = function () {
 };
 
 window.submitMove = async function (isOutsource = false) {
+  if (adminViewLine) {
+    return notify("Admin đang ở chế độ chỉ xem, không thể chuyển công đoạn.");
+  }
   const selectEl = document.getElementById("po-select");
   if (!selectEl) return;
   const selectedValue = selectEl.value;
-  if (!selectedValue) return alert("Vui lòng chọn 1 LOT để thao tác!");
+  if (!selectedValue) return notify("Vui lòng chọn 1 LOT để thao tác!");
 
   const routeData = JSON.parse(selectedValue);
   const qtyPass = parseInt(document.getElementById("qty-pass").value) || 0;
@@ -2192,16 +2738,32 @@ window.submitMove = async function (isOutsource = false) {
   const actionDate = document.getElementById("action-date")?.value || "";
 
   if (qtyPass + qtyNg <= 0) {
-    return alert("Vui lòng nhập số lượng PASS hoặc NG lớn hơn 0!");
+    return notify("Vui lòng nhập số lượng PASS hoặc NG lớn hơn 0!");
   }
   if (qtyPass + qtyNg > routeData.max_qty) {
-    return alert(
+    return notify(
       `Tổng số lượng thao tác (${qtyPass + qtyNg}) vượt quá số lượng tồn hiện tại (${routeData.max_qty})!`,
     );
   }
 
+  const nextName = isOutsource
+    ? "Gia công ngoài"
+    : getStageNameById(routeData.to_stage_name) || routeData.to_stage_name;
+  const summary =
+    `LOT ${routeData.po_number || routeData.po_id} [${routeData.product_code || ""}]\n` +
+    `Từ: ${getStageNameById(routeData.from_stage)}\n` +
+    (qtyPass > 0 ? `Đạt (PASS): ${qtyPass} ➔ ${nextName}\n` : "") +
+    (qtyNg > 0 ? `Lỗi (NG): ${qtyNg}\n` : "") +
+    `\nXác nhận chuyển?`;
+  if (!(await confirmDialog(summary, { okText: "Chuyển" }))) return;
+
+  const sendButtons = document.querySelectorAll(
+    "#tab-action button[onclick^='submitMove']",
+  );
+  sendButtons.forEach((b) => (b.disabled = true)); // chặn bấm 2 lần
+
   try {
-    const response = await fetch(`${API_BASE_URL}/api/move`, {
+    const response = await apiFetch(`${API_BASE_URL}/api/move`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -2217,7 +2779,7 @@ window.submitMove = async function (isOutsource = false) {
     });
     const data = await response.json();
     if (response.ok) {
-      alert("Đã cập nhật luân chuyển công đoạn thành công!");
+      notify("Đã cập nhật luân chuyển công đoạn thành công!");
       document.getElementById("qty-pass").value = 0;
       document.getElementById("qty-ng").value = 0;
       document.getElementById("leader-selected-info")?.classList.add("hidden");
@@ -2225,10 +2787,12 @@ window.submitMove = async function (isOutsource = false) {
       await fetchPendingPOs();
       switchTab("leader", "tab-wip");
     } else {
-      alert(data.error || "Có lỗi xảy ra khi chuyển công đoạn.");
+      notify(data.error || "Có lỗi xảy ra khi chuyển công đoạn.");
     }
   } catch (error) {
-    alert("Lỗi kết nối máy chủ API!");
+    notify("Lỗi kết nối máy chủ API!");
+  } finally {
+    sendButtons.forEach((b) => (b.disabled = false));
   }
 };
 

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>APP EMS</title>
     <link rel="stylesheet" href="style.css" />
-    <link rel="manifest" href="manifest.json" />
+    <link rel="manifest" href="manifest.json?v=2" />
     <meta name="theme-color" content="#193958" />
     <link rel="apple-touch-icon" href="logo192.png" />
   </head>
@@ -55,12 +55,22 @@
               Yêu Cầu Đổi Mật Khẩu
             </h3>
             <p style="font-size: 13px; color: #555; margin-bottom: 15px">
-              Vui lòng đặt mật khẩu mới (tối thiểu 4 ký tự) để tiếp tục.
+              Vui lòng đặt mật khẩu mới (tối thiểu 4 ký tự, không dùng mật khẩu
+              mặc định) để tiếp tục.
             </p>
             <input
               type="password"
               id="new-password"
               placeholder="Mật khẩu mới..."
+              autocomplete="new-password"
+              class="w-100"
+              style="margin-bottom: 12px"
+            />
+            <input
+              type="password"
+              id="new-password-confirm"
+              placeholder="Nhập lại mật khẩu mới..."
+              autocomplete="new-password"
               class="w-100"
               style="margin-bottom: 12px"
             />
@@ -78,7 +88,21 @@
 
     <!-- MÀN HÌNH ADMIN (Giao diện Desktop & Responsive) -->
     <div id="admin-screen" class="screen hidden">
+      <div class="sidebar-backdrop" onclick="closeAdminMenu()"></div>
+      <div
+        class="drawer-handle"
+        onclick="openAdminMenu()"
+        title="Vuốt hoặc chạm để mở menu"
+      ></div>
       <header class="navbar">
+        <button
+          type="button"
+          id="btn-open-menu"
+          aria-label="Mở menu"
+          onclick="openAdminMenu()"
+        >
+          ☰
+        </button>
         <div class="nav-brand">Luân chuyển Sản Xuất (VP)</div>
         <div class="nav-user">
           Xin chào, <strong id="admin-name">Admin</strong> |
@@ -514,7 +538,7 @@
                     <label for="ng-current-stage"
                       >2. Công đoạn phát sinh NG</label
                     >
-                    <select id="ng-current-stage" required>
+                    <select id="ng-current-stage" required onchange="onChangeNGStage()">
                       <option value="">-- Chọn công đoạn --</option>
                     </select>
                   </div>
@@ -550,6 +574,11 @@
                     <select id="ng-return-stage">
                       <option value="">-- Chọn công đoạn trả về --</option>
                     </select>
+                    <small class="field-hint">
+                      Lỗi do công đoạn trước gây ra: chọn công đoạn trước để
+                      trả về làm lại (đã gợi ý sẵn theo lộ trình). Hàng sẽ quay
+                      lại tồn của công đoạn đó.
+                    </small>
                   </div>
                   <button type="submit" class="btn btn-danger w-100">
                     Xác Nhận Xử Lý NG
@@ -604,12 +633,21 @@
             <div class="card-header-flex" style="margin-bottom: 10px">
               <div>
                 <h2>Báo Cáo Tiến Độ Sản Xuất (WIP) &amp; Theo Dõi NG</h2>
-                <p>
+                <p class="hide-on-phone">
                   Tổng hợp số lượng OK / NG qua từng công đoạn, Tổng NG lũy kế
                   và Tồn kho thành phẩm theo thời gian thực.
                 </p>
               </div>
-              <div style="display: flex; gap: 6px; flex-wrap: wrap">
+              <div class="matrix-actions" style="display: flex; gap: 6px; flex-wrap: wrap">
+                <select
+                  id="line-view-select"
+                  class="line-view-select"
+                  title="Xem màn hình Leader của từng Line (chỉ xem)"
+                  aria-label="Xem màn hình Line"
+                  onchange="openLineView(this.value); this.value = '';"
+                >
+                  <option value="">👁 Xem màn hình Line…</option>
+                </select>
                 <button
                   type="button"
                   class="btn btn-primary"
@@ -619,21 +657,21 @@
                 </button>
                 <button
                   type="button"
-                  class="btn btn-success"
+                  class="btn btn-success hide-on-phone"
                   onclick="exportMatrixExcel()"
                 >
                   📊 Xuất Excel (.xls)
                 </button>
                 <button
                   type="button"
-                  class="btn btn-secondary"
+                  class="btn btn-secondary hide-on-phone"
                   onclick="exportMatrixCSV()"
                 >
                   📄 Xuất CSV
                 </button>
                 <button
                   type="button"
-                  class="btn btn-secondary"
+                  class="btn btn-secondary hide-on-phone"
                   onclick="window.print()"
                 >
                   🖨️ In Báo Cáo
@@ -643,8 +681,28 @@
 
             <!-- BỘ LỌC BÁO CÁO ĐA CHIỀU -->
             <div class="card filter-panel">
+              <div class="phone-toggle-row">
+                <button
+                  type="button"
+                  id="btn-toggle-filter"
+                  class="btn-chip"
+                  aria-pressed="false"
+                  onclick="toggleMatrixFilters()"
+                >
+                  ⚙ Bộ lọc thêm
+                </button>
+                <button
+                  type="button"
+                  id="btn-toggle-kpi"
+                  class="btn-chip"
+                  aria-pressed="false"
+                  onclick="toggleMatrixKPI()"
+                >
+                  📊 Số tổng
+                </button>
+              </div>
               <div class="filter-row">
-                <div class="filter-item">
+                <div class="filter-item filter-extra">
                   <label for="search-date-from">Từ ngày cấp phát</label>
                   <input
                     type="date"
@@ -653,7 +711,7 @@
                     onchange="filterMatrix()"
                   />
                 </div>
-                <div class="filter-item">
+                <div class="filter-item filter-extra">
                   <label for="search-date-to">Đến ngày cấp phát</label>
                   <input
                     type="date"
@@ -664,16 +722,34 @@
                 </div>
                 <div class="filter-item">
                   <label for="search-code">Mã Hàng</label>
-                  <input
-                    type="text"
-                    id="search-code"
-                    list="matrix-product-suggest"
-                    class="search-input"
-                    placeholder="🔍 Tất cả mã hàng..."
-                    oninput="filterMatrix()"
-                    style="text-transform: uppercase"
-                  />
-                  <datalist id="matrix-product-suggest"></datalist>
+                  <div class="combo">
+                    <input
+                      type="text"
+                      id="search-code"
+                      class="search-input"
+                      placeholder="🔍 Tất cả mã hàng..."
+                      oninput="filterMatrix()"
+                      style="text-transform: uppercase"
+                      autocomplete="off"
+                      role="combobox"
+                      aria-expanded="false"
+                      aria-controls="search-code-list"
+                    />
+                    <button
+                      type="button"
+                      class="combo-btn"
+                      id="search-code-btn"
+                      tabindex="-1"
+                      aria-label="Mở danh sách mã hàng"
+                    >
+                      ▾
+                    </button>
+                    <ul
+                      id="search-code-list"
+                      class="combo-list hidden"
+                      role="listbox"
+                    ></ul>
+                  </div>
                 </div>
                 <div class="filter-item">
                   <label for="search-lot">Số LOT / PO</label>
@@ -686,7 +762,7 @@
                     style="text-transform: uppercase"
                   />
                 </div>
-                <div class="filter-item">
+                <div class="filter-item filter-extra">
                   <label for="search-status">Trạng thái LOT</label>
                   <select
                     id="search-status"
@@ -702,7 +778,7 @@
                   </select>
                 </div>
               </div>
-              <div class="filter-quick-bar">
+              <div class="filter-quick-bar filter-extra">
                 <span
                   style="font-size: 12px; color: var(--muted); font-weight: 600"
                   >Chọn nhanh thời gian:</span
@@ -891,6 +967,12 @@
 
     <!-- MÀN HÌNH LEADER (Giao diện Mobile-First) -->
     <div id="leader-screen" class="screen hidden">
+      <div id="admin-view-banner" class="admin-view-banner" role="status">
+        <span>👁 Đang xem màn hình Line <strong id="admin-view-line"></strong> (chỉ xem)</span>
+        <button type="button" class="btn btn-secondary" onclick="closeLineView()">
+          ← Về Admin
+        </button>
+      </div>
       <header class="navbar mobile-nav">
         <div class="nav-brand">
           Xin chào,
@@ -1006,6 +1088,9 @@
             <h3 style="color: var(--navy); margin-bottom: 14px">
               Xác Nhận Giao Hàng Qua Trạm
             </h3>
+            <p class="admin-view-note">
+              Admin đang ở chế độ chỉ xem, không thao tác chuyển công đoạn.
+            </p>
             <div class="input-group">
               <label for="action-date">Ngày thực hiện</label>
               <input type="date" id="action-date" required />
@@ -1039,13 +1124,32 @@
                   Điền tối đa tồn
                 </button>
               </div>
-              <input type="number" id="qty-pass" value="0" min="0" />
+              <input
+                type="number"
+                id="qty-pass"
+                class="qty-input"
+                value="0"
+                min="0"
+                inputmode="numeric"
+                pattern="[0-9]*"
+                onfocus="this.select()"
+              />
             </div>
             <div class="input-group">
               <label for="qty-ng" class="text-error"
                 >Số lượng lỗi phát sinh (NG)</label
               >
-              <input type="number" id="qty-ng" value="0" min="0" />
+              <input
+                type="number"
+                id="qty-ng"
+                class="qty-input"
+                value="0"
+                min="0"
+                inputmode="numeric"
+                pattern="[0-9]*"
+                onfocus="this.select()"
+                oninput="syncPassWithNg()"
+              />
             </div>
             <button
               type="button"
@@ -1156,7 +1260,7 @@
       </main>
     </div>
 
-    <!-- <script src="mock.js"></script> -->
+    <script src="mock.js"></script>
     <script src="script.js"></script>
   </body>
 </html>

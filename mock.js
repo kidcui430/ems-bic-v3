@@ -43,10 +43,10 @@
       },
       {
         id: 4,
-        username: "LD_GP",
-        full_name: "Tổ Trưởng GP-GE-GI",
+        username: "LD_GS",
+        full_name: "Tổ Trưởng GS-GV",
         role: "LEADER",
-        line_id: "GP_GE_GI",
+        line_id: "GS_GV",
         password_hash: "1234",
       },
       {
@@ -73,11 +73,37 @@
         line_id: "KENSA",
         password_hash: "1234",
       },
+      {
+        id: 8,
+        username: "LD_MNC",
+        full_name: "Tổ Trưởng MNC",
+        role: "LEADER",
+        line_id: "MNC",
+        password_hash: "1234",
+      },
+      {
+        id: 9,
+        username: "LD_GP",
+        full_name: "Tổ Trưởng GP-GE-GI",
+        role: "LEADER",
+        line_id: "GP_GE_GI",
+        password_hash: "1234",
+      },
     ],
     stages: [
       { id: "CAT", line_id: "CUTTING", stage_name: "Cắt", sort_order: 1 },
-      { id: "NHIET_LUYEN", line_id: "CUTTING", stage_name: "Nhiệt luyện", sort_order: 2 },
-      { id: "DO_CUNG", line_id: "CUTTING", stage_name: "Độ cứng", sort_order: 3 },
+      {
+        id: "NHIET_LUYEN",
+        line_id: "CUTTING",
+        stage_name: "Nhiệt luyện",
+        sort_order: 2,
+      },
+      {
+        id: "DO_CUNG",
+        line_id: "CUTTING",
+        stage_name: "Độ cứng",
+        sort_order: 3,
+      },
       { id: "NC1", line_id: "NC", stage_name: "NC1", sort_order: 4 },
       { id: "NC2", line_id: "NC", stage_name: "NC2", sort_order: 5 },
       { id: "NC3", line_id: "NC", stage_name: "NC3", sort_order: 6 },
@@ -89,12 +115,32 @@
       { id: "GP", line_id: "GP_GE_GI", stage_name: "GP", sort_order: 12 },
       { id: "GE", line_id: "GP_GE_GI", stage_name: "GE", sort_order: 13 },
       { id: "GI", line_id: "GP_GE_GI", stage_name: "GI", sort_order: 14 },
-      { id: "BARRY", line_id: "BARRY", stage_name: "Bavia (Barry)", sort_order: 15 },
+      {
+        id: "BARRY",
+        line_id: "BARRY",
+        stage_name: "Bavia (Barry)",
+        sort_order: 15,
+      },
       { id: "XUAT_GCN", line_id: "ASSY", stage_name: "Đi GCN", sort_order: 16 },
-      { id: "NHAN_GCN", line_id: "ASSY", stage_name: "Nhận GCN", sort_order: 17 },
+      {
+        id: "NHAN_GCN",
+        line_id: "ASSY",
+        stage_name: "Nhận GCN",
+        sort_order: 17,
+      },
       { id: "LAP_RAP", line_id: "ASSY", stage_name: "Lắp ráp", sort_order: 18 },
-      { id: "KIEM_TRA", line_id: "KENSA", stage_name: "Kiểm tra", sort_order: 19 },
-      { id: "DONG_THUNG", line_id: "ASSY", stage_name: "Đóng thùng", sort_order: 20 },
+      {
+        id: "KIEM_TRA",
+        line_id: "KENSA",
+        stage_name: "Kiểm tra",
+        sort_order: 19,
+      },
+      {
+        id: "DONG_THUNG",
+        line_id: "ASSY",
+        stage_name: "Đóng thùng",
+        sort_order: 20,
+      },
     ],
     products: [
       {
@@ -127,28 +173,146 @@
       },
     ],
     orders: [
-      { po_number: "PO1611-01", product_id: "ASW-40", month: "2026-11-15", total_qty: 100, status: "OPEN" },
-      { po_number: "PO1611-02", product_id: "ASW-40", month: "2026-11-15", total_qty: 100, status: "OPEN" },
-      { po_number: "PO1611-03", product_id: "TB-30", month: "2026-11-16", total_qty: 150, status: "OPEN" },
-      { po_number: "PO1611-04", product_id: "TB-30", month: "2026-11-16", total_qty: 150, status: "OPEN" },
+      {
+        po_number: "PO1611-01",
+        product_id: "ASW-40",
+        month: "2026-11-15",
+        total_qty: 100,
+        status: "OPEN",
+      },
+      {
+        po_number: "PO1611-02",
+        product_id: "ASW-40",
+        month: "2026-11-15",
+        total_qty: 100,
+        status: "OPEN",
+      },
+      {
+        po_number: "PO1611-03",
+        product_id: "TB-30",
+        month: "2026-11-16",
+        total_qty: 150,
+        status: "OPEN",
+      },
+      {
+        po_number: "PO1611-04",
+        product_id: "TB-30",
+        month: "2026-11-16",
+        total_qty: 150,
+        status: "OPEN",
+      },
     ],
     inventory: [
-      { product_id: "ASW-40", lot_number: "PO1611-01", stage_id: "BARRY", quantity: 40, updated_at: "2026-11-16 01:30:00" },
-      { product_id: "ASW-40", lot_number: "PO1611-01", stage_id: "NC2_NG", quantity: 5, updated_at: "2026-11-16 01:15:00" },
-      { product_id: "ASW-40", lot_number: "PO1611-01", stage_id: "THANH_PHAM", quantity: 55, updated_at: "2026-11-16 02:00:00" },
-      { product_id: "ASW-40", lot_number: "PO1611-02", stage_id: "DO_CUNG", quantity: 30, updated_at: "2026-11-16 01:10:00" },
-      { product_id: "ASW-40", lot_number: "PO1611-02", stage_id: "NC2", quantity: 70, updated_at: "2026-11-16 02:10:00" },
-      { product_id: "TB-30", lot_number: "PO1611-03", stage_id: "GP", quantity: 120, updated_at: "2026-11-16 02:20:00" },
-      { product_id: "TB-30", lot_number: "PO1611-03", stage_id: "NC1_NG", quantity: 8, updated_at: "2026-11-16 01:40:00" },
-      { product_id: "TB-30", lot_number: "PO1611-03", stage_id: "KIEM_TRA", quantity: 22, updated_at: "2026-11-16 02:35:00" },
-      { product_id: "TB-30", lot_number: "PO1611-04", stage_id: "CAT", quantity: 150, updated_at: "2026-11-16 02:45:00" },
+      {
+        product_id: "ASW-40",
+        lot_number: "PO1611-01",
+        stage_id: "BARRY",
+        quantity: 40,
+        updated_at: "2026-11-16 01:30:00",
+      },
+      {
+        product_id: "ASW-40",
+        lot_number: "PO1611-01",
+        stage_id: "NC2_NG",
+        quantity: 5,
+        updated_at: "2026-11-16 01:15:00",
+      },
+      {
+        product_id: "ASW-40",
+        lot_number: "PO1611-01",
+        stage_id: "THANH_PHAM",
+        quantity: 55,
+        updated_at: "2026-11-16 02:00:00",
+      },
+      {
+        product_id: "ASW-40",
+        lot_number: "PO1611-02",
+        stage_id: "DO_CUNG",
+        quantity: 30,
+        updated_at: "2026-11-16 01:10:00",
+      },
+      {
+        product_id: "ASW-40",
+        lot_number: "PO1611-02",
+        stage_id: "NC2",
+        quantity: 70,
+        updated_at: "2026-11-16 02:10:00",
+      },
+      {
+        product_id: "TB-30",
+        lot_number: "PO1611-03",
+        stage_id: "GP",
+        quantity: 120,
+        updated_at: "2026-11-16 02:20:00",
+      },
+      {
+        product_id: "TB-30",
+        lot_number: "PO1611-03",
+        stage_id: "NC1_NG",
+        quantity: 8,
+        updated_at: "2026-11-16 01:40:00",
+      },
+      {
+        product_id: "TB-30",
+        lot_number: "PO1611-03",
+        stage_id: "KIEM_TRA",
+        quantity: 22,
+        updated_at: "2026-11-16 02:35:00",
+      },
+      {
+        product_id: "TB-30",
+        lot_number: "PO1611-04",
+        stage_id: "CAT",
+        quantity: 150,
+        updated_at: "2026-11-16 02:45:00",
+      },
     ],
     history: [
-      { timestamp: "2026-11-16 02:35:00", user_id: 6, po_id: "PO1611-03", from_stage: "LAP_RAP", to_stage: "KIEM_TRA", qty: 22, type: "PASS" },
-      { timestamp: "2026-11-16 02:00:00", user_id: 6, po_id: "PO1611-01", from_stage: "DONG_THUNG", to_stage: "THANH_PHAM", qty: 55, type: "PASS" },
-      { timestamp: "2026-11-16 01:40:00", user_id: 3, po_id: "PO1611-03", from_stage: "NC1", to_stage: "KHO_NG", qty: 8, type: "NG" },
-      { timestamp: "2026-11-16 01:30:00", user_id: 3, po_id: "PO1611-01", from_stage: "NC2", to_stage: "BARRY", qty: 40, type: "PASS" },
-      { timestamp: "2026-11-16 01:15:00", user_id: 3, po_id: "PO1611-01", from_stage: "NC2", to_stage: "KHO_NG", qty: 5, type: "NG" },
+      {
+        timestamp: "2026-11-16 02:35:00",
+        user_id: 6,
+        po_id: "PO1611-03",
+        from_stage: "LAP_RAP",
+        to_stage: "KIEM_TRA",
+        qty: 22,
+        type: "PASS",
+      },
+      {
+        timestamp: "2026-11-16 02:00:00",
+        user_id: 6,
+        po_id: "PO1611-01",
+        from_stage: "DONG_THUNG",
+        to_stage: "THANH_PHAM",
+        qty: 55,
+        type: "PASS",
+      },
+      {
+        timestamp: "2026-11-16 01:40:00",
+        user_id: 3,
+        po_id: "PO1611-03",
+        from_stage: "NC1",
+        to_stage: "KHO_NG",
+        qty: 8,
+        type: "NG",
+      },
+      {
+        timestamp: "2026-11-16 01:30:00",
+        user_id: 3,
+        po_id: "PO1611-01",
+        from_stage: "NC2",
+        to_stage: "BARRY",
+        qty: 40,
+        type: "PASS",
+      },
+      {
+        timestamp: "2026-11-16 01:15:00",
+        user_id: 3,
+        po_id: "PO1611-01",
+        from_stage: "NC2",
+        to_stage: "KHO_NG",
+        qty: 5,
+        type: "NG",
+      },
     ],
   };
 
@@ -196,20 +360,63 @@
     const db = loadDB();
 
     if (path === "/api/login" && method === "POST") {
-      const uname = String(body.username || "").trim().toUpperCase();
+      const uname = String(body.username || "")
+        .trim()
+        .toUpperCase();
       const pass = String(body.password || "");
       const user = db.users.find(
         (x) => x.username.toUpperCase() === uname && x.password_hash === pass,
       );
-      if (!user) return makeJsonRes({ error: "Sai tài khoản hoặc mật khẩu! (Mock)" }, 401);
-      return makeJsonRes({ success: true, user });
+      if (!user)
+        return makeJsonRes(
+          { error: "Sai tài khoản hoặc mật khẩu! (Mock)" },
+          401,
+        );
+      // Giống server thật: không trả mật khẩu, có cờ đổi mật khẩu + token giả
+      const { password_hash, ...safeUser } = user;
+      return makeJsonRes({
+        success: true,
+        user: {
+          ...safeUser,
+          must_change_password: ["000", "0000"].includes(pass),
+          token: "mock-token-" + user.id,
+        },
+      });
+    }
+
+    // Giống server thật: mọi API còn lại cần token
+    const authHeader =
+      (init.headers &&
+        (init.headers.Authorization || init.headers.authorization)) ||
+      "";
+    if (!authHeader.startsWith("Bearer ")) {
+      return makeJsonRes(
+        { error: "Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại! (Mock)" },
+        401,
+      );
+    }
+
+    if (path === "/api/change-password" && method === "POST") {
+      const uid = Number(authHeader.replace("Bearer mock-token-", ""));
+      const me = db.users.find((x) => x.id === uid);
+      if (!me || me.password_hash !== String(body.old_password || "")) {
+        return makeJsonRes(
+          { error: "Mật khẩu hiện tại không đúng! (Mock)" },
+          400,
+        );
+      }
+      me.password_hash = String(body.new_password || "");
+      saveDB(db);
+      return makeJsonRes({ success: true, token: "mock-token-" + me.id });
     }
 
     if (path === "/api/stages" && method === "GET") {
       return makeJsonRes({ data: db.stages });
     }
     if (path === "/api/stages" && method === "POST") {
-      const id = String(body.id || "").trim().toUpperCase();
+      const id = String(body.id || "")
+        .trim()
+        .toUpperCase();
       const existIdx = db.stages.findIndex((s) => s.id === id);
       if (existIdx >= 0) {
         db.stages[existIdx].stage_name = body.stage_name;
@@ -232,7 +439,9 @@
       return makeJsonRes({ success: true });
     }
     if (path.startsWith("/api/stages/") && method === "PUT") {
-      const stgId = decodeURIComponent(path.replace("/api/stages/", "")).toUpperCase();
+      const stgId = decodeURIComponent(
+        path.replace("/api/stages/", ""),
+      ).toUpperCase();
       const stg = db.stages.find((s) => s.id === stgId);
       if (stg) {
         stg.stage_name = body.stage_name;
@@ -242,7 +451,9 @@
       return makeJsonRes({ success: true });
     }
     if (path.startsWith("/api/stages/") && method === "DELETE") {
-      const stgId = decodeURIComponent(path.replace("/api/stages/", "")).toUpperCase();
+      const stgId = decodeURIComponent(
+        path.replace("/api/stages/", ""),
+      ).toUpperCase();
       db.stages = db.stages.filter((s) => s.id !== stgId);
       saveDB(db);
       return makeJsonRes({ success: true });
@@ -252,12 +463,16 @@
       return makeJsonRes({ products: db.products });
     }
     if (path === "/api/products" && method === "POST") {
-      const code = String(body.product_code || "").trim().toUpperCase();
+      const code = String(body.product_code || "")
+        .trim()
+        .toUpperCase();
       const routingStr =
         typeof body.routing_map === "string"
           ? body.routing_map
           : JSON.stringify(body.routing_map || []);
-      const existing = db.products.find((p) => p.product_code.toUpperCase() === code);
+      const existing = db.products.find(
+        (p) => p.product_code.toUpperCase() === code,
+      );
       if (existing) {
         existing.product_name = body.product_name;
         existing.routing_map = routingStr;
@@ -273,8 +488,12 @@
       return makeJsonRes({ success: true });
     }
     if (path.startsWith("/api/products/") && method === "PUT") {
-      const code = decodeURIComponent(path.replace("/api/products/", "")).toUpperCase();
-      const existing = db.products.find((p) => p.product_code.toUpperCase() === code);
+      const code = decodeURIComponent(
+        path.replace("/api/products/", ""),
+      ).toUpperCase();
+      const existing = db.products.find(
+        (p) => p.product_code.toUpperCase() === code,
+      );
       if (existing) {
         existing.product_name = body.product_name;
         existing.routing_map =
@@ -286,18 +505,29 @@
       return makeJsonRes({ success: true });
     }
     if (path.startsWith("/api/products/") && method === "DELETE") {
-      const code = decodeURIComponent(path.replace("/api/products/", "")).toUpperCase();
-      db.products = db.products.filter((p) => p.product_code.toUpperCase() !== code);
+      const code = decodeURIComponent(
+        path.replace("/api/products/", ""),
+      ).toUpperCase();
+      db.products = db.products.filter(
+        (p) => p.product_code.toUpperCase() !== code,
+      );
       saveDB(db);
       return makeJsonRes({ success: true });
     }
 
     if (path === "/api/po/create" && method === "POST") {
       const prod = db.products.find(
-        (p) => p.product_code.toUpperCase() === String(body.product_code || "").toUpperCase(),
+        (p) =>
+          p.product_code.toUpperCase() ===
+          String(body.product_code || "").toUpperCase(),
       );
       if (!prod) return makeJsonRes({ error: "Mã hàng chưa khai báo!" }, 400);
-      if (db.orders.some((o) => o.po_number.toUpperCase() === String(body.po_number).toUpperCase())) {
+      if (
+        db.orders.some(
+          (o) =>
+            o.po_number.toUpperCase() === String(body.po_number).toUpperCase(),
+        )
+      ) {
         return makeJsonRes({ error: `LOT ${body.po_number} đã tồn tại!` }, 400);
       }
       const rMap = JSON.parse(prod.routing_map || "[]");
@@ -364,9 +594,14 @@
 
       const pending = [];
       db.inventory.forEach((inv) => {
-        if (inv.quantity > 0 && myStageIds.includes(inv.stage_id.toUpperCase())) {
+        if (
+          inv.quantity > 0 &&
+          myStageIds.includes(inv.stage_id.toUpperCase())
+        ) {
           const prod = db.products.find(
-            (p) => p.product_code.toUpperCase() === String(inv.product_id).toUpperCase(),
+            (p) =>
+              p.product_code.toUpperCase() ===
+              String(inv.product_id).toUpperCase(),
           );
           let nextStage = "Hoàn thành (Nhập kho)";
           if (prod && prod.routing_map) {
@@ -407,7 +642,9 @@
       invItem.updated_at = nowUTCString();
 
       const prod = db.products.find(
-        (p) => p.product_code.toUpperCase() === String(invItem.product_id).toUpperCase(),
+        (p) =>
+          p.product_code.toUpperCase() ===
+          String(invItem.product_id).toUpperCase(),
       );
       let nextStg = "THANH_PHAM";
       if (body.is_outsource) {
@@ -498,14 +735,19 @@
 
     if (path === "/api/ng/resolve" && method === "POST") {
       const lotNo = body.lot_number;
-      const rawStg = String(body.current_stage || "").toUpperCase().replace(/_NG$/, "");
+      const rawStg = String(body.current_stage || "")
+        .toUpperCase()
+        .replace(/_NG$/, "");
       const ngStg = `${rawStg}_NG`;
       const q = Number(body.qty) || 0;
       const ngItem = db.inventory.find(
         (i) => i.lot_number === lotNo && i.stage_id.toUpperCase() === ngStg,
       );
       if (!ngItem || ngItem.quantity < q) {
-        return makeJsonRes({ error: "Số lượng xử lý vượt quá số NG tại trạm!" }, 400);
+        return makeJsonRes(
+          { error: "Số lượng xử lý vượt quá số NG tại trạm!" },
+          400,
+        );
       }
       ngItem.quantity -= q;
 
@@ -537,7 +779,8 @@
         });
       } else {
         let scrap = db.inventory.find(
-          (i) => i.lot_number === lotNo && i.stage_id.toUpperCase() === "SCRAP_NG",
+          (i) =>
+            i.lot_number === lotNo && i.stage_id.toUpperCase() === "SCRAP_NG",
         );
         if (scrap) {
           scrap.quantity += q;
@@ -611,7 +854,8 @@
   };
 
   window.mockResetData = function () {
-    if (!confirm("Khôi phục lại toàn bộ dữ liệu mẫu ban đầu của chế độ Mock?")) return;
+    if (!confirm("Khôi phục lại toàn bộ dữ liệu mẫu ban đầu của chế độ Mock?"))
+      return;
     localStorage.setItem(MOCK_STORAGE_KEY, JSON.stringify(INITIAL_MOCK_DB));
     window.location.reload();
   };

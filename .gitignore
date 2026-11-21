@@ -1,0 +1,5 @@
+.wrangler/
+.dev.vars
+backup.sql
+*.sql.bak
+node_modules/
